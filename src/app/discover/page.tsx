@@ -1,295 +1,252 @@
-"use client";
+'use client';
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
-import { clearSession } from "@/lib/session";
+import { requireAuthOrRedirect } from "@/lib/session";
+import { useRouter } from "next/navigation";
 
 type Profile = {
   id: string;
   name?: string;
   age?: number;
+  photoUrl?: string;
   city?: string;
   bio?: string;
-  photoUrl?: string;
-  photos?: string[];
 };
 
-function normProfile(raw: any): Profile {
-  const id = String(raw?.id || raw?._id || raw?.uid || "");
-  return {
-    id,
-    name: raw?.name ?? raw?.displayName ?? raw?.username ?? "Unknown",
-    age: typeof raw?.age === "number" ? raw.age : undefined,
-    city: raw?.city ?? raw?.location?.city ?? undefined,
-    bio: raw?.bio ?? raw?.about ?? "",
-    photoUrl: raw?.photoUrl ?? raw?.photo ?? raw?.avatarUrl ?? (Array.isArray(raw?.photos) ? raw.photos[0] : undefined),
-    photos: Array.isArray(raw?.photos) ? raw.photos : undefined,
-  };
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
 export default function DiscoverPage() {
   const router = useRouter();
-
+  const [loading, setLoading] = useState(true);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const [sheet, setSheet] = useState<Profile | null>(null);
+  const top = profiles[idx];
 
-  // swipe
-  const startRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
+  // Swipe state
+  const startX = useRef<number | null>(null);
+  const currentX = useRef<number>(0);
+  const dragging = useRef(false);
 
-  const active = profiles[idx] || null;
-  const next = profiles[idx + 1] || null;
+  const transform = useMemo(() => {
+    const dx = currentX.current;
+    const rot = clamp(dx / 18, -12, 12);
+    return `translateX(${dx}px) rotate(${rot}deg)`;
+  }, [idx, sheetOpen]);
 
   useEffect(() => {
-    let alive = true;
+    requireAuthOrRedirect(router);
     (async () => {
       try {
         const res = await apiGet("/api/feed");
-        const arr = Array.isArray(res?.profiles) ? res.profiles : Array.isArray(res) ? res : [];
-        if (!alive) return;
-        setProfiles(arr.map(normProfile).filter(p => p.id));
-        setIdx(0);
-      } catch (e) {
-        console.error(e);
+        const list = Array.isArray(res?.profiles) ? res.profiles : Array.isArray(res) ? res : [];
+        setProfiles(list);
+      } catch (e: any) {
+        setStatus(e?.message ? String(e.message) : "Failed to load feed.");
+      } finally {
+        setLoading(false);
       }
     })();
-    return () => { alive = false; };
-  }, []);
+  }, [router]);
 
-  const label = useMemo(() => {
-    if (!active) return "";
-    const parts = [active.name, active.age ? String(active.age) : ""].filter(Boolean).join(", ");
-    return parts || "Profile";
-  }, [active]);
+  function nextCard() {
+    setIdx((v) => Math.min(v + 1, profiles.length));
+    currentX.current = 0;
+    startX.current = null;
+  }
 
-  async function send(action: "like" | "pass", profileId: string) {
-    if (!profileId || busy) return;
-    setBusy(true);
+  async function like() {
+    if (!top) return;
+    setStatus("Liked.");
     try {
-      await apiPost(`/api/${action}`, { profileId });
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setBusy(false);
-      setDrag({ x: 0, y: 0, active: false });
-      setIdx(v => Math.min(v + 1, profiles.length));
-    }
+      await apiPost("/api/like", { targetId: top.id });
+    } catch {}
+    nextCard();
+  }
+
+  function pass() {
+    if (!top) return;
+    setStatus("Passed.");
+    nextCard();
   }
 
   function onPointerDown(e: React.PointerEvent) {
-    if (!active || sheet) return;
+    if (sheetOpen) return;
+    dragging.current = true;
+    startX.current = e.clientX;
+    currentX.current = 0;
     (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-    startRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
-    setDrag({ x: 0, y: 0, active: true });
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    if (!startRef.current || !drag.active || sheet) return;
-    const dx = e.clientX - startRef.current.x;
-    const dy = e.clientY - startRef.current.y;
-    setDrag({ x: dx, y: dy, active: true });
+    if (!dragging.current || startX.current == null || sheetOpen) return;
+    const dx = e.clientX - startX.current;
+    currentX.current = dx;
+    // Force render
+    setIdx((v) => v);
   }
 
-  async function onPointerUp() {
-    if (!startRef.current || sheet) return;
-    const dx = drag.x;
-    const dy = drag.y;
-    startRef.current = null;
+  function onPointerUp() {
+    if (!dragging.current || sheetOpen) return;
+    dragging.current = false;
+    const dx = currentX.current;
 
-    const absX = Math.abs(dx);
-    const absY = Math.abs(dy);
+    const threshold = 90;
+    if (dx > threshold) return void like();
+    if (dx < -threshold) return void pass();
 
-    // Up swipe opens sheet
-    if (dy < -120 && absY > absX) {
-      setSheet(active);
-      setDrag({ x: 0, y: 0, active: false });
-      return;
-    }
-
-    // Left / right swipe
-    if (dx > 140) return send("like", active?.id || "");
-    if (dx < -140) return send("pass", active?.id || "");
-
-    setDrag({ x: 0, y: 0, active: false });
+    // Snap back
+    currentX.current = 0;
+    startX.current = null;
+    setIdx((v) => v);
   }
 
-  async function logout() {
-    clearSession?.();
-    router.replace("/login");
-  }
+  if (loading) return <div style={{ padding: 18 }}>Loading…</div>;
+
+  if (!top)
+    return (
+      <div style={{ padding: 18 }}>
+        <h1 style={{ margin: "8px 0 6px" }}>Discover</h1>
+        <div style={{ opacity: 0.85 }}>No more profiles.</div>
+      </div>
+    );
 
   return (
-    <div className="ff-shell">
-      <div className="ff-topbar">
-        <div className="ff-topbar-left">
-          <img className="ff-logo" src="/FFmenuheaderlogo.png" alt="FrugalFetishes" />
-          <span className="ff-badge">Discover</span>
+    <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
+      <div style={{ width: "min(520px, 92vw)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+          <h1 style={{ margin: 0 }}>Discover</h1>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>{status || "Ready"}</div>
         </div>
 
-        <div className="ff-topbar-right">
-          <button className="ff-iconbtn" onClick={() => router.push("/matches")} aria-label="Matches" title="Matches">💬</button>
-          <button className="ff-iconbtn" onClick={logout} aria-label="Logout" title="Logout">⎋</button>
-        </div>
-      </div>
+        {/* Card stack */}
+        <div style={{ position: "relative", height: 540 }}>
+          {/* Next card peek */}
+          {profiles[idx + 1] && (
+            <div
+              className="panel"
+              style={{
+                position: "absolute",
+                inset: 0,
+                transform: "scale(0.98) translateY(10px)",
+                opacity: 0.5,
+              }}
+            />
+          )}
 
-      <div
-        className="ff-glass"
-        style={{
-          width: "min(980px, 94vw)",
-          minHeight: 520,
-          padding: 18,
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        <div style={{ display: "flex", gap: 16, alignItems: "stretch", justifyContent: "space-between" }}>
-          {/* art side */}
+          {/* Active card */}
           <div
-            style={{
-              flex: 1,
-              minHeight: 460,
-              borderRadius: 22,
-              position: "relative",
-              overflow: "hidden",
-              background:
-                "radial-gradient(700px 500px at 22% 28%, rgba(255,79,163,.22), transparent 60%), radial-gradient(700px 500px at 80% 60%, rgba(124,58,237,.20), transparent 60%), rgba(0,0,0,.18)",
-              border: "1px solid rgba(255,255,255,.10)",
-            }}
-          >
-            {/* decorative circles */}
-            <div style={{ position: "absolute", top: 24, left: 24, width: 96, height: 96, borderRadius: 999, border: "2px solid rgba(255,255,255,.14)" }} />
-            <div style={{ position: "absolute", bottom: 26, right: 26, width: 56, height: 56, borderRadius: 999, border: "2px solid rgba(255,255,255,.10)" }} />
-
-            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-              <div style={{ textAlign: "center" }}>
-                <img
-                  src={active?.photoUrl || "/frugalfetishes.png"}
-                  alt={label}
-                  style={{
-                    width: 320,
-                    height: 420,
-                    objectFit: "cover",
-                    borderRadius: 22,
-                    border: "1px solid rgba(255,255,255,.18)",
-                    boxShadow: "0 26px 70px rgba(0,0,0,.55)",
-                    transform: sheet ? "scale(.98)" : `translate(${drag.x}px, ${drag.y}px) rotate(${drag.x * 0.04}deg)`,
-                    transition: drag.active ? "none" : "transform 180ms ease",
-                    touchAction: "none",
-                    userSelect: "none",
-                  }}
-                  onPointerDown={onPointerDown}
-                  onPointerMove={onPointerMove}
-                  onPointerUp={onPointerUp}
-                  onPointerCancel={onPointerUp}
-                />
-
-                <div style={{ marginTop: 12, fontWeight: 900 }}>{label}</div>
-                <div className="ff-subtle" style={{ fontSize: 13 }}>
-                  Swipe: left=pass • right=like • up=view
-                </div>
-              </div>
-            </div>
-
-            {/* next card shadow */}
-            {next ? (
-              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", opacity: 0.35, pointerEvents: "none" }}>
-                <div
-                  style={{
-                    width: 300,
-                    height: 400,
-                    borderRadius: 22,
-                    border: "1px solid rgba(255,255,255,.10)",
-                    background: "rgba(0,0,0,.18)",
-                    transform: "translate(22px, 18px)",
-                    filter: "blur(0.2px)",
-                  }}
-                />
-              </div>
-            ) : null}
-          </div>
-
-          {/* controls side */}
-          <div style={{ width: 340, display: "flex", flexDirection: "column", gap: 12 }}>
-            <h2 className="ff-title" style={{ fontSize: 34, margin: "6px 0 0" }}>Find your match</h2>
-            <div className="ff-subtle" style={{ fontSize: 13, lineHeight: 1.35 }}>
-              Keep it playful. Swipe, peek, and see who clicks.
-            </div>
-
-            <div style={{ height: 10 }} />
-
-            <div className="ff-pillrow">
-              <button className="ff-pill" onClick={() => active && send("pass", active.id)} aria-label="Pass" title="Pass">❌</button>
-              <button className="ff-pill" onClick={() => active && setSheet(active)} aria-label="View" title="View">👁️</button>
-              <button className="ff-pill ff-pillPrimary" onClick={() => active && send("like", active.id)} aria-label="Like" title="Like">❤️</button>
-            </div>
-
-            <div className="ff-subtle" style={{ fontSize: 12, textAlign: "center" }}>
-              Tip: you can still click the picture, then swipe.
-            </div>
-
-            <div style={{ flex: 1 }} />
-
-            <div className="ff-subtle" style={{ fontSize: 12, textAlign: "center" }}>
-              Profiles shown are dev data. Matches appear after mutual likes.
-            </div>
-          </div>
-        </div>
-
-        {/* sheet */}
-        {sheet ? (
-          <div
+            className="panel"
             style={{
               position: "absolute",
               inset: 0,
-              background: "rgba(0,0,0,.62)",
-              display: "grid",
-              placeItems: "center",
-              padding: 18,
-              zIndex: 10,
+              overflow: "hidden",
+              transform,
+              transition: dragging.current ? "none" : "transform 180ms ease",
+              touchAction: "pan-y",
+              userSelect: "none",
+              cursor: sheetOpen ? "default" : "grab",
             }}
-            onClick={() => setSheet(null)}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
           >
             <div
-              className="ff-glass"
-              style={{ width: "min(880px, 94vw)", padding: 18, display: "grid", gap: 12 }}
-              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "absolute",
+                inset: 0,
+                backgroundImage: `url(${top.photoUrl || ""})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                filter: "saturate(1.05) contrast(1.02)",
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,.18) 45%, rgba(0,0,0,.05))",
+              }}
+            />
+
+            <div style={{ position: "absolute", left: 16, right: 16, bottom: 14 }}>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>
+                {top.name || "Unknown"}
+                {typeof top.age === "number" ? `, ${top.age}` : ""}
+              </div>
+              <div style={{ opacity: 0.8, fontSize: 13, marginTop: 2 }}>
+                {top.city ? top.city : ""}
+              </div>
+
+              <div className="actionRow" style={{ marginTop: 12 }}>
+                <button className="actionIcon" aria-label="Pass" onClick={pass} title="Pass">
+                  ✕
+                </button>
+                <button className="actionIcon primary" aria-label="View profile" onClick={() => setSheetOpen(true)} title="View">
+                  👁
+                </button>
+                <button className="actionIcon primary" aria-label="Like" onClick={like} title="Like">
+                  ♥
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75, textAlign: "center" }}>
+                Swipe left=pass • right=like • up=view profile
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom sheet */}
+        {sheetOpen && (
+          <div className="menuOverlay" role="dialog" aria-modal="true">
+            <button className="overlayBackdrop" aria-label="Close profile" onClick={() => setSheetOpen(false)} />
+            <aside
+              className="menuPanel"
+              style={{
+                left: "50%",
+                transform: "translateX(-50%)",
+                top: "auto",
+                bottom: 10,
+                width: "min(560px, calc(100% - 20px))",
+              }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <img className="ff-avatar" src={sheet.photoUrl || "/frugalfetishes.png"} alt={sheet.name || "Profile"} />
-                  <div>
-                    <div style={{ fontWeight: 900 }}>{sheet.name} {sheet.age ? `, ${sheet.age}` : ""}</div>
-                    <div className="ff-subtle" style={{ fontSize: 12 }}>{sheet.city || ""}</div>
-                  </div>
+              <div className="menuHeader">
+                <div className="menuTitle">Profile</div>
+                <button className="iconBtn" aria-label="Close" onClick={() => setSheetOpen(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: "12px 6px", display: "grid", gap: 10 }}>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>
+                  {top.name || "Unknown"} {typeof top.age === "number" ? `• ${top.age}` : ""}
                 </div>
-                <button className="ff-iconbtn" onClick={() => setSheet(null)} aria-label="Close" title="Close">✕</button>
+                {top.city && <div style={{ opacity: 0.85 }}>{top.city}</div>}
+                {top.bio && <div style={{ opacity: 0.85, lineHeight: 1.5 }}>{top.bio}</div>}
               </div>
 
-              <div className="ff-subtle" style={{ lineHeight: 1.5 }}>
-                {sheet.bio || "No bio yet."}
+              <div className="menuFooter" style={{ display: "flex", gap: 10 }}>
+                <button className="pillBtn" onClick={() => setSheetOpen(false)}>
+                  Close
+                </button>
+                <button className="pillBtn danger" onClick={() => (setSheetOpen(false), pass())}>
+                  Pass
+                </button>
+                <button className="pillBtn" onClick={() => (setSheetOpen(false), like())}>
+                  Like
+                </button>
               </div>
-
-              <div className="ff-pillrow" style={{ justifyContent: "flex-end" }}>
-                <button className="ff-pill" onClick={() => active && send("pass", active.id)} aria-label="Pass" title="Pass">❌</button>
-                <button className="ff-pill ff-pillPrimary" onClick={() => active && send("like", active.id)} aria-label="Like" title="Like">❤️</button>
-              </div>
-            </div>
+            </aside>
           </div>
-        ) : null}
-
-        {/* empty */}
-        {!active ? (
-          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 6 }}>No more profiles</div>
-              <div className="ff-subtle" style={{ fontSize: 13 }}>Seed more dev users, then refresh.</div>
-            </div>
-          </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
