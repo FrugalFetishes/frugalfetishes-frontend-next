@@ -1,136 +1,104 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
-import { loadSession } from "@/lib/session";
 
-type MatchRow = {
-  matchId: string;
-  otherUid: string | null;
-  matchedAt: any;
-  profile: any | null;
+type MatchProfile = {
+  id: string;
+  name?: string;
+  age?: number;
+  city?: string;
+  bio?: string;
+  photoUrl?: string;
 };
 
-export default function MatchDetailPage() {
-  const params = useParams();
-  const matchId = useMemo(() => {
-    const raw = (params as any)?.id;
-    return typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : "";
-  }, [params]);
+function norm(raw: any): MatchProfile {
+  return {
+    id: String(raw?.id || raw?._id || raw?.uid || ""),
+    name: raw?.name ?? raw?.displayName ?? raw?.username ?? "Match",
+    age: typeof raw?.age === "number" ? raw.age : undefined,
+    city: raw?.city ?? raw?.location?.city ?? undefined,
+    bio: raw?.bio ?? raw?.about ?? "",
+    photoUrl: raw?.photoUrl ?? raw?.photo ?? raw?.avatarUrl ?? "/frugalfetishes.png",
+  };
+}
 
-  const [status, setStatus] = useState("Loading…");
-  const [match, setMatch] = useState<MatchRow | null>(null);
+export default function MatchProfilePage() {
+  const router = useRouter();
+  const params = useParams();
+  const id = String((params as any)?.id || "");
+  const [p, setP] = useState<MatchProfile | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = loadSession();
-    if (!token) {
-      window.location.href = "/login";
-      return;
-    }
-    if (!matchId) {
-      window.location.href = "/matches";
-      return;
-    }
-
+    let alive = true;
     (async () => {
-      setStatus("Loading match…");
-      const res = await apiGet("/api/matches?limit=50");
-
-      if (!res?.ok) {
-        setStatus(`Match load failed: ${res?.error || "unknown error"}`);
-        return;
+      try {
+        const res = await apiGet(`/api/matches/${encodeURIComponent(id)}`);
+        const prof = res?.profile ? res.profile : res;
+        if (!alive) return;
+        setP(norm(prof));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (alive) setLoading(false);
       }
-
-      const list: MatchRow[] = Array.isArray(res.items) ? res.items : Array.isArray(res.matches) ? res.matches : [];
-      const found = list.find((m) => String(m.matchId) === String(matchId)) || null;
-
-      setMatch(found);
-      setStatus(found ? "Ready" : "Match not found (go back to Matches).");
     })();
-  }, [matchId]);
-
-  const p = match?.profile || {};
-  const name = p.displayName || "Unknown";
-  const city = p.city || "";
-  const age = typeof p.age === "number" ? p.age : undefined;
-  const bio = p.bio || p.about || "";
-  const photos: string[] = Array.isArray(p.photos) ? p.photos : [];
-  const photo = photos[0] || p.photoUrl || "";
+    return () => { alive = false; };
+  }, [id]);
 
   return (
-    <main style={{ padding: 24, maxWidth: 860, margin: "0 auto" }} className="ff-page">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <button className="ff-btn" onClick={() => (window.location.href = "/matches")} style={{ padding: "10px 14px" }}>
-          ← Back
-        </button>
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="ff-btn" onClick={() => (window.location.href = `/chat/${encodeURIComponent(matchId)}`)} style={{ padding: "10px 14px" }}>
-            Open chat
-          </button>
+    <div className="ff-shell">
+      <div className="ff-topbar">
+        <div className="ff-topbar-left">
+          <img className="ff-logo" src="/FFmenuheaderlogo.png" alt="FrugalFetishes" />
+          <span className="ff-badge">Match</span>
+        </div>
+        <div className="ff-topbar-right">
+          <button className="ff-iconbtn" onClick={() => router.push("/matches")} aria-label="Back" title="Back">←</button>
+          <button className="ff-iconbtn" onClick={() => router.push(`/chat/${encodeURIComponent(id)}`)} aria-label="Chat" title="Chat">💬</button>
         </div>
       </div>
 
-      <div style={{ marginTop: 14, opacity: 0.9 }}>{status}</div>
-
-      {match ? (
-        <div
-          style={{
-            marginTop: 14,
-            border: "1px solid rgba(255,255,255,0.14)",
-            borderRadius: 18,
-            background: "rgba(255,255,255,0.04)",
-            overflow: "hidden"
-          }}
-        >
-          <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 0 }}>
-            <div style={{ minHeight: 320, background: "rgba(255,255,255,0.06)", display: "grid", placeItems: "center" }}>
-              {photo ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={photo} alt={name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : (
-                <div style={{ opacity: 0.85 }}>No photo</div>
-              )}
-            </div>
-
-            <div style={{ padding: 18 }}>
-              <h1 style={{ marginTop: 0, marginBottom: 8 }}>
-                {name}{age !== undefined ? `, ${age}` : ""}
-              </h1>
-              <div style={{ opacity: 0.9, marginBottom: 12 }}>{city}</div>
-
-              {bio ? (
-                <div style={{ opacity: 0.95, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{bio}</div>
-              ) : (
-                <div style={{ opacity: 0.85 }}>No bio yet.</div>
-              )}
-
-              {photos.length > 1 ? (
-                <div style={{ marginTop: 16 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>More photos</div>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {photos.slice(1, 6).map((u, i) => (
-                      <div key={i} style={{ width: 92, height: 92, borderRadius: 12, overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={u} alt={`${name} ${i + 2}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      </div>
-                    ))}
-                  </div>
+      <div className="ff-glass" style={{ width: "min(980px, 92vw)", padding: 18 }}>
+        {loading ? (
+          <div className="ff-subtle">Loading…</div>
+        ) : !p ? (
+          <div className="ff-subtle">Not found.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <img
+                src={p.photoUrl || "/frugalfetishes.png"}
+                alt={p.name || "Match"}
+                style={{
+                  width: 120,
+                  height: 120,
+                  borderRadius: 24,
+                  objectFit: "cover",
+                  border: "1px solid rgba(255,255,255,.18)",
+                  boxShadow: "0 20px 60px rgba(0,0,0,.55)",
+                }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 28, fontWeight: 950, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {p.name}{p.age ? `, ${p.age}` : ""}
                 </div>
-              ) : null}
-
-              <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
-                <button className="ff-btn" onClick={() => (window.location.href = `/chat/${encodeURIComponent(matchId)}`)} style={{ padding: "10px 14px" }}>
-                  Message
-                </button>
-                <button className="ff-btn" onClick={() => (window.location.href = "/discover")} style={{ padding: "10px 14px" }}>
-                  Back to Discover
-                </button>
+                <div className="ff-subtle">{p.city || ""}</div>
               </div>
             </div>
+
+            <div className="ff-subtle" style={{ lineHeight: 1.6 }}>
+              {p.bio || "No bio yet."}
+            </div>
+
+            <div className="ff-pillrow" style={{ justifyContent: "flex-end" }}>
+              <button className="ff-pill ff-pillPrimary" onClick={() => router.push(`/chat/${encodeURIComponent(id)}`)} aria-label="Chat" title="Chat">💬</button>
+            </div>
           </div>
-        </div>
-      ) : null}
-    </main>
+        )}
+      </div>
+    </div>
   );
 }
