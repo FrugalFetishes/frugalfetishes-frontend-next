@@ -265,6 +265,13 @@ export default function DiscoverPage() {
 
   return (
     <main style={{ padding: 24 }}>
+      <button
+        onClick={() => (window.location.href = "/matches")}
+        style={{ position: "fixed", top: 16, right: 96, padding: "10px 14px", zIndex: 9999 }}
+      >
+        Matches
+      </button>
+
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
           <h1 style={{ margin: 0 }}>Discover</h1>
