@@ -43,23 +43,21 @@ function demoDeck(): Profile[] {
       age: 34,
       city: "Miami",
       bio: "Just here to test the swipe deck.",
-      photoUrl: "/creatingme/pigtailed.jpg"
-    },
+      photoUrl: "https://picsum.photos/800/1200?random=11"},
     {
       id: "demo_jess",
       name: "Jess",
       age: 34,
       city: "Orlando",
       bio: "Demo profile — like/pass to test.",
-      photoUrl: "/creatingme/pigtailed.jpg"
-    },
+      photoUrl: "https://picsum.photos/800/1200?random=12"},
     {
       id: "demo_rebecca",
       name: "Rebecca",
       age: 44,
       city: "Tampa",
       bio: "Demo profile — tap View to open.",
-      photoUrl: "/creatingme/pigtailed.jpg"
+      photoUrl: "https://picsum.photos/800/1200?random=13"
     }
   ];
 }
@@ -382,23 +380,17 @@ export default function DiscoverPage() {
           </div>
         ) : (
           <div style={card}>
-            <img
-              src={(current.photoUrl
-                ? (current.photoUrl.startsWith("http")
-                    ? current.photoUrl
-                    : current.photoUrl.startsWith("/")
-                      ? current.photoUrl
-                      : `/${current.photoUrl}`)
-                : "/frugalfetishes.png")}
-              alt={current.name}
-              style={imgStyle}
-              onError={(e) => {
-                const img = e.currentTarget as HTMLImageElement;
-                if ((img as any).dataset?.fallback === "1") return;
-                (img as any).dataset.fallback = "1";
-                img.src = "/frugalfetishes.png";
-              }}
-            />
+                      <img
+            src={normalizePhotoUrl(current.photoUrl) ?? placeholderAvatarDataUri(current.name)}
+            alt={`${current.name}'s photo`}
+            style={imgStyle}
+            onError={(e) => {
+              // If a remote/local image fails, fall back to a generated placeholder (NOT the brand logo).
+              const el = e.currentTarget as HTMLImageElement;
+              el.onerror = null;
+              el.src = placeholderAvatarDataUri(current.name);
+            }}
+          />
             <div style={overlay} />
 
             <div style={footer}>
