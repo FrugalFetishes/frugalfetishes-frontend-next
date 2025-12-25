@@ -24,6 +24,12 @@ function getPrimaryPhoto(p: FeedProfile) {
   return (p.photos && p.photos[0]) || p.photoUrl || "";
 }
 
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return Boolean(el.closest("button,a,input,textarea,select,label"));
+}
+
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
@@ -125,6 +131,7 @@ export default function DiscoverPage() {
   function onPointerDown(e: React.PointerEvent) {
     if (!top) return;
     if (selected) return; // sheet open; stack disabled
+    if (isInteractiveTarget(e.target)) return;
 
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
@@ -378,6 +385,7 @@ export default function DiscoverPage() {
 
                 <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
                   <button
+                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -392,6 +400,7 @@ export default function DiscoverPage() {
                   </button>
 
                   <button
+                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -403,6 +412,7 @@ export default function DiscoverPage() {
                   </button>
 
                   <button
+                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -529,6 +539,7 @@ export default function DiscoverPage() {
 
               <div style={{ display: "flex", gap: 10 }}>
                 <button
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onClick={async () => {
                     const uid = getUid(selected);
                     if (uid) await like(uid);
@@ -540,6 +551,7 @@ export default function DiscoverPage() {
                   Like
                 </button>
                 <button
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onClick={async () => {
                     const uid = getUid(selected);
                     if (uid) await pass(uid);
@@ -550,7 +562,7 @@ export default function DiscoverPage() {
                 >
                   Pass
                 </button>
-                <button onClick={() => setSelected(null)} style={{ padding: "10px 14px" }}>
+                <button onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setSelected(null)} style={{ padding: "10px 14px" }}>
                   Back
                 </button>
               </div>
