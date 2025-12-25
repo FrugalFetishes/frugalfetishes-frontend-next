@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { requireAuthOrRedirect } from "@/lib/session";
-import { useRouter } from "next/navigation";
 
 type Match = {
   id: string;
@@ -15,16 +13,14 @@ type Match = {
 };
 
 export default function MatchesPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [matches, setMatches] = useState<Match[]>([]);
   const [status, setStatus] = useState("");
 
   useEffect(() => {
-    requireAuthOrRedirect(router);
     (async () => {
       try {
-        const res = await apiGet("/api/matches");
+        const res: any = await apiGet("/api/matches");
         const list = Array.isArray(res?.matches) ? res.matches : Array.isArray(res) ? res : [];
         setMatches(list);
       } catch (e: any) {
@@ -33,7 +29,7 @@ export default function MatchesPage() {
         setLoading(false);
       }
     })();
-  }, [router]);
+  }, []);
 
   return (
     <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
@@ -87,7 +83,7 @@ export default function MatchesPage() {
                     {typeof m.age === "number" ? `, ${m.age}` : ""}
                   </div>
                   <div style={{ opacity: 0.78, fontSize: 13, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {m.lastMessage || "Tap to open chat"}
+                    {m.lastMessage || "Tap to open"}
                   </div>
                 </div>
               </Link>
