@@ -14,6 +14,51 @@ type Profile = {
   photoUrl?: string;
 };
 
+function normalizePhotoUrl(url?: string): string | null {
+  if (!url) return null;
+  const u = String(url).trim();
+  if (!u) return null;
+
+  // Common bug: people store paths like "/public/foo.png" in data.
+  if (u.startsWith("/public/")) return "/" + u.slice("/public/".length);
+  if (u.startsWith("public/")) return "/" + u.slice("public/".length);
+
+  // Already absolute URL
+  if (/^https?:\/\//i.test(u)) return u;
+
+  // Root-relative
+  if (u.startsWith("/")) return u;
+
+  // Otherwise treat as root-relative file name/path
+  return "/" + u;
+}
+
+function placeholderAvatarDataUri(name?: string) {
+  const safe = (name || "User").trim();
+  const initials = safe
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase() ?? "")
+    .join("") || "U";
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#2a0f2b"/>
+        <stop offset="100%" stop-color="#1a1a2e"/>
+      </linearGradient>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#g)"/>
+    <text x="50%" y="55%" text-anchor="middle" dominant-baseline="middle"
+      font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial"
+      font-size="160" fill="rgba(255,255,255,0.85)">${initials}</text>
+  </svg>`;
+
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+}
+
+
 const SEEN_KEY = "ff_seen_profiles_v1";
 
 function loadSeen(): Set<string> {
