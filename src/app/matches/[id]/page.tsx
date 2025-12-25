@@ -1,101 +1,96 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
+import Link from "next/link";
+import { requireAuthOrRedirect } from "@/lib/session";
 
 type MatchProfile = {
   id: string;
   name?: string;
   age?: number;
+  photoUrl?: string;
   city?: string;
   bio?: string;
-  photoUrl?: string;
 };
-
-function norm(raw: any): MatchProfile {
-  return {
-    id: String(raw?.id || raw?._id || raw?.uid || ""),
-    name: raw?.name ?? raw?.displayName ?? raw?.username ?? "Match",
-    age: typeof raw?.age === "number" ? raw.age : undefined,
-    city: raw?.city ?? raw?.location?.city ?? undefined,
-    bio: raw?.bio ?? raw?.about ?? "",
-    photoUrl: raw?.photoUrl ?? raw?.photo ?? raw?.avatarUrl ?? "/frugalfetishes.png",
-  };
-}
 
 export default function MatchProfilePage() {
   const router = useRouter();
-  const params = useParams();
-  const id = String((params as any)?.id || "");
-  const [p, setP] = useState<MatchProfile | null>(null);
+  const params = useParams<{ id: string }>();
+  const id = params?.id;
+
   const [loading, setLoading] = useState(true);
+  const [p, setP] = useState<MatchProfile | null>(null);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
-    let alive = true;
+    requireAuthOrRedirect(router);
     (async () => {
       try {
-        const res = await apiGet(`/api/matches/${encodeURIComponent(id)}`);
-        const prof = res?.profile ? res.profile : res;
-        if (!alive) return;
-        setP(norm(prof));
-      } catch (e) {
-        console.error(e);
+        const res = await apiGet(`/api/matches/${id}`);
+        const prof = res?.profile || res;
+        setP(prof || null);
+      } catch (e: any) {
+        setStatus(e?.message ? String(e.message) : "Failed to load profile.");
       } finally {
-        if (alive) setLoading(false);
+        setLoading(false);
       }
     })();
-    return () => { alive = false; };
-  }, [id]);
+  }, [router, id]);
 
   return (
-    <div className="ff-shell">
-      <div className="ff-topbar">
-        <div className="ff-topbar-left">
-          <img className="ff-logo" src="/FFmenuheaderlogo.png" alt="FrugalFetishes" />
-          <span className="ff-badge">Match</span>
+    <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
+      <div style={{ width: "min(720px, 92vw)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+          <h1 style={{ margin: 0 }}>Match</h1>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>{status || (loading ? "Loading…" : "")}</div>
         </div>
-        <div className="ff-topbar-right">
-          <button className="ff-iconbtn" onClick={() => router.push("/matches")} aria-label="Back" title="Back">←</button>
-          <button className="ff-iconbtn" onClick={() => router.push(`/chat/${encodeURIComponent(id)}`)} aria-label="Chat" title="Chat">💬</button>
-        </div>
-      </div>
 
-      <div className="ff-glass" style={{ width: "min(980px, 92vw)", padding: 18 }}>
-        {loading ? (
-          <div className="ff-subtle">Loading…</div>
-        ) : !p ? (
-          <div className="ff-subtle">Not found.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <img
-                src={p.photoUrl || "/frugalfetishes.png"}
-                alt={p.name || "Match"}
-                style={{
-                  width: 120,
-                  height: 120,
-                  borderRadius: 24,
-                  objectFit: "cover",
-                  border: "1px solid rgba(255,255,255,.18)",
-                  boxShadow: "0 20px 60px rgba(0,0,0,.55)",
-                }}
-              />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 28, fontWeight: 950, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {p.name}{p.age ? `, ${p.age}` : ""}
-                </div>
-                <div className="ff-subtle">{p.city || ""}</div>
+        <div className="panel" style={{ overflow: "hidden" }}>
+          <div style={{ position: "relative", height: 360 }}>
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: `url(${p?.photoUrl || ""}) center/cover no-repeat, rgba(255,255,255,.06)`,
+              }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background: "linear-gradient(to top, rgba(0,0,0,.75), rgba(0,0,0,.15) 50%, rgba(0,0,0,.05))",
+              }}
+            />
+            <div style={{ position: "absolute", left: 16, right: 16, bottom: 14 }}>
+              <div style={{ fontSize: 24, fontWeight: 950 }}>
+                {p?.name || "Unknown"} {typeof p?.age === "number" ? `, ${p.age}` : ""}
               </div>
+              {p?.city && <div style={{ opacity: 0.8, marginTop: 4 }}>{p.city}</div>}
             </div>
+          </div>
 
-            <div className="ff-subtle" style={{ lineHeight: 1.6 }}>
-              {p.bio || "No bio yet."}
-            </div>
+          <div style={{ padding: 16, display: "grid", gap: 12 }}>
+            {p?.bio && <div style={{ opacity: 0.86, lineHeight: 1.6 }}>{p.bio}</div>}
 
-            <div className="ff-pillrow" style={{ justifyContent: "flex-end" }}>
-              <button className="ff-pill ff-pillPrimary" onClick={() => router.push(`/chat/${encodeURIComponent(id)}`)} aria-label="Chat" title="Chat">💬</button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Link className="pillBtn" href={`/chat/${id}`}>
+                Open chat
+              </Link>
+              <Link className="pillBtn" href="/matches">
+                Back to matches
+              </Link>
+              <Link className="pillBtn" href="/discover">
+                Discover
+              </Link>
             </div>
+          </div>
+        </div>
+
+        {!loading && !p && (
+          <div style={{ marginTop: 12, opacity: 0.85 }}>
+            Could not load this match. Go back to <Link href="/matches">Matches</Link>.
           </div>
         )}
       </div>
