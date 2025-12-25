@@ -33,6 +33,30 @@ function normalizePhotoUrl(url?: string): string | null {
   return "/" + u;
 }
 
+function pickPhotoUrl(p: any): string | undefined {
+    const candidates: any[] = [
+      p?.photoUrl,
+      p?.photoURL,
+      p?.photo,
+      p?.avatarUrl,
+      p?.avatarURL,
+      p?.profilePhotoUrl,
+      p?.profilePhotoURL,
+      p?.imageUrl,
+      p?.imageURL,
+      p?.images?.[0],
+      p?.photos?.[0],
+      p?.photoUrls?.[0],
+      p?.photoURLs?.[0],
+      p?.pictures?.[0],
+    ];
+    for (const c of candidates) {
+      const u = normalizePhotoUrl(c);
+      if (u) return u;
+    }
+    return undefined;
+  }
+
 function placeholderAvatarDataUri(name?: string) {
   const safe = (name || "User").trim();
   const initials = safe
@@ -113,6 +137,10 @@ export default function DiscoverPage() {
   const [cursor, setCursor] = useState<number>(0);
   const [status, setStatus] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
+  const [useDemo, setUseDemo] = useState<boolean>(false);
+  const [dragX, setDragX] = useState<number>(0);
+  const [dragging, setDragging] = useState<boolean>(false);
+  const dragStartX = useRef<number>(0);
 
   const originalDeckRef = useRef<Profile[] | null>(null);
 
@@ -151,10 +179,14 @@ export default function DiscoverPage() {
         }))
         .filter((p) => p.id && !seen.has(p.id));
 
-      // If backend has nothing, fall back to a demo deck so you can test UI flows.
+      // If backend has nothing, only use the demo deck when you explicitly enable it (Reset Deck).
       if (!list.length) {
-        list = demoDeck().filter((p) => !seen.has(p.id));
-        setStatus("No more profiles available. Using demo deck for testing.");
+        if (useDemo) {
+          list = demoDeck().filter((p) => !seen.has(p.id));
+          setStatus("No more profiles available. Using demo deck for testing.");
+        } else {
+          setStatus("No more profiles available.");
+        }
       } else {
         setStatus("");
       }
@@ -166,9 +198,15 @@ export default function DiscoverPage() {
         originalDeckRef.current = list;
       }
     } catch (e: any) {
-      setProfiles(demoDeck());
-      setCursor(0);
-      setStatus("Feed error. Showing demo deck.");
+      if (useDemo) {
+        setProfiles(demoDeck());
+        setCursor(0);
+        setStatus("Feed error. Showing demo deck for testing.");
+      } else {
+        setProfiles([]);
+        setCursor(0);
+        setStatus("Feed error. Try Refresh, or use Reset Deck to load a demo deck.");
+      }
     } finally {
       setBusy(false);
     }
@@ -180,7 +218,42 @@ export default function DiscoverPage() {
     saveSeen(seen);
   }
 
-  async function sendDecision(decision: "like" | "pass") {
+  
+  function onCardPointerDown(e: any) {
+    if (busy || !current) return;
+    setDragging(true);
+    dragStartX.current = e.clientX;
+    setDragX(0);
+    try {
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    } catch {}
+  }
+
+  function onCardPointerMove(e: any) {
+    if (!dragging) return;
+    const dx = e.clientX - dragStartX.current;
+    setDragX(dx);
+  }
+
+  function onCardPointerUp(e: any) {
+    if (!dragging) return;
+    setDragging(false);
+    const dx = e.clientX - dragStartX.current;
+    const TH = 120;
+    if (dx > TH) {
+      setDragX(0);
+      sendDecision("like");
+      return;
+    }
+    if (dx < -TH) {
+      setDragX(0);
+      sendDecision("pass");
+      return;
+    }
+    setDragX(0);
+  }
+
+async function sendDecision(decision: "like" | "pass") {
     if (!token || !current || busy) return;
     setBusy(true);
     try {
@@ -200,19 +273,19 @@ export default function DiscoverPage() {
   }
 
   function resetDeck() {
+    // Explicitly enable demo deck for testing (so we don't show random demo photos unless you ask for it).
+    setUseDemo(true);
     try {
       localStorage.removeItem(SEEN_KEY);
     } catch {}
-    setStatus("Resetting…");
-    // Use original deck if we have one; otherwise refetch.
-    if (originalDeckRef.current && originalDeckRef.current.length) {
-      setProfiles(originalDeckRef.current);
-      setCursor(0);
-      setStatus("Deck reset.");
-      setTimeout(() => setStatus(""), 900);
-    } else {
-      refreshDeck();
-    }
+    const deck = demoDeck();
+    originalDeckRef.current = deck;
+    setProfiles(deck);
+    setCursor(0);
+    setDragX(0);
+    setDragging(false);
+    setStatus("Demo deck loaded.");
+    setTimeout(() => setStatus(""), 900);
   }
 
   // Keyboard shortcuts for quick testing:
@@ -308,6 +381,8 @@ export default function DiscoverPage() {
     width: "100%",
     height: "100%",
     objectFit: "cover",
+    pointerEvents: "none",
+    userSelect: "none",
     filter: "contrast(1.03) saturate(1.05)"
   };
 
@@ -424,10 +499,22 @@ export default function DiscoverPage() {
             </div>
           </div>
         ) : (
-          <div style={card}>
+          <div
+            style={{
+              ...card,
+              transform: `translateX(${dragX}px) rotate(${dragX / 20}deg)`,
+              transition: dragging ? "none" : "transform 200ms ease",
+              cursor: "grab",
+            }}
+            onPointerDown={onCardPointerDown}
+            onPointerMove={onCardPointerMove}
+            onPointerUp={onCardPointerUp}
+            onPointerCancel={onCardPointerUp}
+          >
                       <img
-            src={normalizePhotoUrl(current.photoUrl) ?? placeholderAvatarDataUri(current.name)}
+            src={current.photoUrl ?? placeholderAvatarDataUri(current.name)}
             alt={`${current.name}'s photo`}
+            draggable={false}
             style={imgStyle}
             onError={(e) => {
               // If a remote/local image fails, fall back to a generated placeholder (NOT the brand logo).
