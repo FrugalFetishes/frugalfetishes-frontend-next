@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import { requireAuthOrRedirect } from "@/lib/session";
 import { useRouter } from "next/navigation";
 
 type Profile = {
@@ -28,7 +27,6 @@ export default function DiscoverPage() {
 
   const top = profiles[idx];
 
-  // Swipe state
   const startX = useRef<number | null>(null);
   const currentX = useRef<number>(0);
   const dragging = useRef(false);
@@ -40,10 +38,9 @@ export default function DiscoverPage() {
   }, [idx, sheetOpen]);
 
   useEffect(() => {
-    requireAuthOrRedirect(router);
     (async () => {
       try {
-        const res = await apiGet("/api/feed");
+        const res: any = await apiGet("/api/feed");
         const list = Array.isArray(res?.profiles) ? res.profiles : Array.isArray(res) ? res : [];
         setProfiles(list);
       } catch (e: any) {
@@ -52,7 +49,7 @@ export default function DiscoverPage() {
         setLoading(false);
       }
     })();
-  }, [router]);
+  }, []);
 
   function nextCard() {
     setIdx((v) => Math.min(v + 1, profiles.length));
@@ -75,6 +72,10 @@ export default function DiscoverPage() {
     nextCard();
   }
 
+  function openProfile() {
+    setSheetOpen(true);
+  }
+
   function onPointerDown(e: React.PointerEvent) {
     if (sheetOpen) return;
     dragging.current = true;
@@ -87,7 +88,6 @@ export default function DiscoverPage() {
     if (!dragging.current || startX.current == null || sheetOpen) return;
     const dx = e.clientX - startX.current;
     currentX.current = dx;
-    // Force render
     setIdx((v) => v);
   }
 
@@ -100,7 +100,6 @@ export default function DiscoverPage() {
     if (dx > threshold) return void like();
     if (dx < -threshold) return void pass();
 
-    // Snap back
     currentX.current = 0;
     startX.current = null;
     setIdx((v) => v);
@@ -124,9 +123,7 @@ export default function DiscoverPage() {
           <div style={{ opacity: 0.75, fontSize: 13 }}>{status || "Ready"}</div>
         </div>
 
-        {/* Card stack */}
         <div style={{ position: "relative", height: 540 }}>
-          {/* Next card peek */}
           {profiles[idx + 1] && (
             <div
               className="panel"
@@ -139,7 +136,6 @@ export default function DiscoverPage() {
             />
           )}
 
-          {/* Active card */}
           <div
             className="panel"
             style={{
@@ -181,15 +177,13 @@ export default function DiscoverPage() {
                 {top.name || "Unknown"}
                 {typeof top.age === "number" ? `, ${top.age}` : ""}
               </div>
-              <div style={{ opacity: 0.8, fontSize: 13, marginTop: 2 }}>
-                {top.city ? top.city : ""}
-              </div>
+              <div style={{ opacity: 0.8, fontSize: 13, marginTop: 2 }}>{top.city ? top.city : ""}</div>
 
               <div className="actionRow" style={{ marginTop: 12 }}>
                 <button className="actionIcon" aria-label="Pass" onClick={pass} title="Pass">
                   ✕
                 </button>
-                <button className="actionIcon primary" aria-label="View profile" onClick={() => setSheetOpen(true)} title="View">
+                <button className="actionIcon primary" aria-label="View profile" onClick={openProfile} title="View">
                   👁
                 </button>
                 <button className="actionIcon primary" aria-label="Like" onClick={like} title="Like">
@@ -198,13 +192,12 @@ export default function DiscoverPage() {
               </div>
 
               <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75, textAlign: "center" }}>
-                Swipe left=pass • right=like • up=view profile
+                Swipe left=pass • right=like • tap 👁 to view
               </div>
             </div>
           </div>
         </div>
 
-        {/* Bottom sheet */}
         {sheetOpen && (
           <div className="menuOverlay" role="dialog" aria-modal="true">
             <button className="overlayBackdrop" aria-label="Close profile" onClick={() => setSheetOpen(false)} />
