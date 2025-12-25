@@ -129,7 +129,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <main style={{ padding: 18, maxWidth: 900, margin: "0 auto" }}>
+    <main style={{ padding: 18, maxWidth: 900, margin: "0 auto" }} className="ff-page">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
@@ -137,7 +137,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           <div style={{ opacity: 0.6, marginTop: 4, fontSize: 12 }}>matchId: {matchId}</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={() => (window.location.href = "/matches")} style={{ padding: "10px 14px" }}>
+          <button className="ff-btn" onClick={() => (window.location.href = "/matches")} style={{ padding: "10px 14px" }}>
             Back
           </button>
         </div>
@@ -199,7 +199,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           placeholder="Write a message…"
           style={{ flex: 1, padding: 12 }}
         />
-        <button onClick={send} disabled={sending} style={{ padding: "12px 16px" }}>
+        <button className="ff-btn" onClick={send} disabled={sending} style={{ padding: "12px 16px" }}>
           Send
         </button>
       </div>
