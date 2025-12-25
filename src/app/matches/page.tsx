@@ -52,11 +52,11 @@ export default function MatchesPage() {
   }, []);
 
   return (
-    <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
+    <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }} className="ff-page">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <h1 style={{ margin: 0 }}>Matches</h1>
         <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={() => (window.location.href = "/discover")} style={{ padding: "10px 14px" }}>
+          <button className="ff-btn" onClick={() => (window.location.href = "/discover")} style={{ padding: "10px 14px" }}>
             Discover
           </button>
         </div>
@@ -73,7 +73,7 @@ export default function MatchesPage() {
           const photo = (Array.isArray(p.photos) && p.photos[0]) || p.photoUrl || "";
 
           return (
-            <button
+            <button className="ff-btn"
               key={m.matchId}
               onClick={() => (window.location.href = `/matches/${encodeURIComponent(m.matchId)}`)}
               style={{
