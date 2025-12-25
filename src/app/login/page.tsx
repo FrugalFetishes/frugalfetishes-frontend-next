@@ -96,7 +96,7 @@ export default function LoginPage() {
               <div style={{ marginBottom: 6, opacity: 0.85 }}>OTP Code</div>
               <input
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
+                onChange={(e) = onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onVerify(); } } }> setOtp(e.target.value)}
                 placeholder="6-digit code"
                 autoComplete="one-time-code"
                 inputMode="numeric"
