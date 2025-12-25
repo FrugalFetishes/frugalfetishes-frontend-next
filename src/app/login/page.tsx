@@ -66,7 +66,7 @@ export default function LoginPage() {
           <div style={{ marginBottom: 6, opacity: 0.85 }}>Email</div>
           <input
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) = onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSendOtp(); } } }> setEmail(e.target.value)}
             placeholder="you@example.com"
             autoComplete="email"
             style={{ width: "100%", padding: 10 }}
