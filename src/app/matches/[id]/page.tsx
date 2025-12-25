@@ -59,13 +59,13 @@ export default function MatchDetailPage() {
   const photo = photos[0] || p.photoUrl || "";
 
   return (
-    <main style={{ padding: 24, maxWidth: 860, margin: "0 auto" }}>
+    <main style={{ padding: 24, maxWidth: 860, margin: "0 auto" }} className="ff-page">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-        <button onClick={() => (window.location.href = "/matches")} style={{ padding: "10px 14px" }}>
+        <button className="ff-btn" onClick={() => (window.location.href = "/matches")} style={{ padding: "10px 14px" }}>
           ← Back
         </button>
         <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={() => (window.location.href = `/chat/${encodeURIComponent(matchId)}`)} style={{ padding: "10px 14px" }}>
+          <button className="ff-btn" onClick={() => (window.location.href = `/chat/${encodeURIComponent(matchId)}`)} style={{ padding: "10px 14px" }}>
             Open chat
           </button>
         </div>
@@ -120,10 +120,10 @@ export default function MatchDetailPage() {
               ) : null}
 
               <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
-                <button onClick={() => (window.location.href = `/chat/${encodeURIComponent(matchId)}`)} style={{ padding: "10px 14px" }}>
+                <button className="ff-btn" onClick={() => (window.location.href = `/chat/${encodeURIComponent(matchId)}`)} style={{ padding: "10px 14px" }}>
                   Message
                 </button>
-                <button onClick={() => (window.location.href = "/discover")} style={{ padding: "10px 14px" }}>
+                <button className="ff-btn" onClick={() => (window.location.href = "/discover")} style={{ padding: "10px 14px" }}>
                   Back to Discover
                 </button>
               </div>
