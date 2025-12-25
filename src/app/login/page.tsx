@@ -1,4 +1,4 @@
-"use client"; 
+"use client";
 
 import { useState } from "react";
 import { startOTP, verifyOTP } from "@/lib/auth";
@@ -66,7 +66,13 @@ export default function LoginPage() {
           <div style={{ marginBottom: 6, opacity: 0.85 }}>Email</div>
           <input
             value={email}
-            onChange={(e) = onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSendOtp(); } } }> setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSendOtp();
+              }
+            }}
             placeholder="you@example.com"
             autoComplete="email"
             style={{ width: "100%", padding: 10 }}
