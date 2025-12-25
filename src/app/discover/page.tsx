@@ -264,8 +264,8 @@ export default function DiscoverPage() {
   const nextPhoto = next ? getPrimaryPhoto(next) : "";
 
   return (
-    <main style={{ padding: 24 }}>
-      <button
+    <main style={{ padding: 24 }} className="ff-page">
+      <button className="ff-btn"
         onClick={() => (window.location.href = "/matches")}
         style={{ position: "fixed", top: 16, right: 96, padding: "10px 14px", zIndex: 9999 }}
       >
@@ -284,7 +284,7 @@ export default function DiscoverPage() {
           ) : null}
         </div>
 
-        <button onClick={logout} style={{ padding: "10px 14px" }}>
+        <button className="ff-btn" onClick={logout} style={{ padding: "10px 14px" }}>
           Logout
         </button>
       </div>
@@ -391,7 +391,7 @@ export default function DiscoverPage() {
                 <div style={{ opacity: 0.9 }}>{top.city || ""}</div>
 
                 <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-                  <button
+                  <button className="ff-btn"
                     onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={(e) => {
                       e.preventDefault();
@@ -406,7 +406,7 @@ export default function DiscoverPage() {
                     Pass
                   </button>
 
-                  <button
+                  <button className="ff-btn"
                     onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={(e) => {
                       e.preventDefault();
@@ -418,7 +418,7 @@ export default function DiscoverPage() {
                     View
                   </button>
 
-                  <button
+                  <button className="ff-btn"
                     onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onClick={(e) => {
                       e.preventDefault();
@@ -495,7 +495,7 @@ export default function DiscoverPage() {
                 {selected.displayName || "Profile"}
                 {typeof selected.age === "number" ? `, ${selected.age}` : ""}
               </div>
-              <button onClick={() => setSelected(null)} style={{ padding: "8px 12px" }}>
+              <button className="ff-btn" onClick={() => setSelected(null)} style={{ padding: "8px 12px" }}>
                 Close
               </button>
             </div>
@@ -545,7 +545,7 @@ export default function DiscoverPage() {
               ) : null}
 
               <div style={{ display: "flex", gap: 10 }}>
-                <button
+                <button className="ff-btn"
                   onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onClick={async () => {
                     const uid = getUid(selected);
@@ -557,7 +557,7 @@ export default function DiscoverPage() {
                 >
                   Like
                 </button>
-                <button
+                <button className="ff-btn"
                   onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onClick={async () => {
                     const uid = getUid(selected);
@@ -569,7 +569,7 @@ export default function DiscoverPage() {
                 >
                   Pass
                 </button>
-                <button onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setSelected(null)} style={{ padding: "10px 14px" }}>
+                <button className="ff-btn" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setSelected(null)} style={{ padding: "10px 14px" }}>
                   Back
                 </button>
               </div>
