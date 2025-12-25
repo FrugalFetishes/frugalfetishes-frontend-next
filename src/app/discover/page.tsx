@@ -145,7 +145,7 @@ export default function DiscoverPage() {
 
       // Best effort: call backend (ignore failures so UI keeps moving)
       try {
-        await apiPost("/api/decision", { targetUserId: current.id, decision }, token);
+        await apiPost("/api/decision", { targetUserId: current.id, decision });
       } catch {}
 
       setCursor((c) => c + 1);
