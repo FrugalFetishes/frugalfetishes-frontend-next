@@ -43,7 +43,7 @@ function demoDeck(): Profile[] {
       age: 34,
       city: "Miami",
       bio: "Just here to test the swipe deck.",
-      photoUrl: "/public/creatingme/pigtailed.jpg"
+      photoUrl: "/creatingme/pigtailed.jpg"
     },
     {
       id: "demo_jess",
@@ -51,7 +51,7 @@ function demoDeck(): Profile[] {
       age: 34,
       city: "Orlando",
       bio: "Demo profile — like/pass to test.",
-      photoUrl: "/public/creatingme/pigtailed.jpg"
+      photoUrl: "/creatingme/pigtailed.jpg"
     },
     {
       id: "demo_rebecca",
@@ -59,7 +59,7 @@ function demoDeck(): Profile[] {
       age: 44,
       city: "Tampa",
       bio: "Demo profile — tap View to open.",
-      photoUrl: "/public/creatingme/pigtailed.jpg"
+      photoUrl: "/creatingme/pigtailed.jpg"
     }
   ];
 }
@@ -336,7 +336,7 @@ export default function DiscoverPage() {
       <div style={topBar}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img
-            src="/public/FFmenuheaderlogo.png"
+            src="/FFmenuheaderlogo.png"
             alt="FrugalFetishes"
             style={{ height: 28, width: "auto", filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.6))" }}
           />
@@ -383,12 +383,20 @@ export default function DiscoverPage() {
         ) : (
           <div style={card}>
             <img
-              src={current.photoUrl || "/public/frugalfetishes.png"}
+              src={(current.photoUrl
+                ? (current.photoUrl.startsWith("http")
+                    ? current.photoUrl
+                    : current.photoUrl.startsWith("/")
+                      ? current.photoUrl
+                      : `/${current.photoUrl}`)
+                : "/frugalfetishes.png")}
               alt={current.name}
               style={imgStyle}
               onError={(e) => {
                 const img = e.currentTarget as HTMLImageElement;
-                img.src = "/public/frugalfetishes.png";
+                if ((img as any).dataset?.fallback === "1") return;
+                (img as any).dataset.fallback = "1";
+                img.src = "/frugalfetishes.png";
               }}
             />
             <div style={overlay} />
