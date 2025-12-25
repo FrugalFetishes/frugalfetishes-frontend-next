@@ -81,7 +81,7 @@ export default function DiscoverPage() {
     setStatus("Refreshing…");
     try {
       const seen = loadSeen();
-      const res = await apiGet("/api/feed", token);
+      const res = await apiGet("/api/feed");
 
       // Accept several possible backend shapes.
       const rawList: any[] =
