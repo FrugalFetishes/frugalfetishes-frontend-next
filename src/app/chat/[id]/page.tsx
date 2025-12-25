@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
-import { requireAuthOrRedirect } from "@/lib/session";
 import Link from "next/link";
 
 type Msg = {
@@ -14,7 +13,6 @@ type Msg = {
 };
 
 export default function ChatPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params?.id;
 
@@ -26,10 +24,9 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    requireAuthOrRedirect(router);
     (async () => {
       try {
-        const res = await apiGet(`/api/chat/${id}`);
+        const res: any = await apiGet(`/api/chat/${id}`);
         const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res) ? res : [];
         setMsgs(list);
       } catch (e: any) {
@@ -38,7 +35,7 @@ export default function ChatPage() {
         setLoading(false);
       }
     })();
-  }, [router, id]);
+  }, [id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -49,9 +46,9 @@ export default function ChatPage() {
     if (!t) return;
     setText("");
     try {
-      const res = await apiPost(`/api/chat/${id}`, { text: t });
+      const res: any = await apiPost(`/api/chat/${id}`, { text: t });
       const msg = res?.message || res;
-      setMsgs((prev) => [...prev, ...(msg ? [msg] : [])]);
+      if (msg) setMsgs((prev) => [...prev, msg]);
     } catch (e: any) {
       setStatus(e?.message ? String(e.message) : "Failed to send.");
     }
