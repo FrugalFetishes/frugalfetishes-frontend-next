@@ -1,582 +1,296 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
-import { clearSession, loadSession } from "@/lib/session";
+import { clearSession } from "@/lib/session";
 
-type FeedProfile = {
-  uid?: string;
-  id?: string;
-  displayName?: string;
+type Profile = {
+  id: string;
+  name?: string;
   age?: number;
   city?: string;
   bio?: string;
-  interests?: string[];
-  photos?: string[];
   photoUrl?: string;
+  photos?: string[];
 };
 
-function getUid(p: FeedProfile) {
-  return String(p.uid || p.id || "");
-}
-
-function getPrimaryPhoto(p: FeedProfile) {
-  return (p.photos && p.photos[0]) || p.photoUrl || "";
-}
-
-function isInteractiveTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  return Boolean(el.closest("button,a,input,textarea,select,label"));
-}
-
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
+function normProfile(raw: any): Profile {
+  const id = String(raw?.id || raw?._id || raw?.uid || "");
+  return {
+    id,
+    name: raw?.name ?? raw?.displayName ?? raw?.username ?? "Unknown",
+    age: typeof raw?.age === "number" ? raw.age : undefined,
+    city: raw?.city ?? raw?.location?.city ?? undefined,
+    bio: raw?.bio ?? raw?.about ?? "",
+    photoUrl: raw?.photoUrl ?? raw?.photo ?? raw?.avatarUrl ?? (Array.isArray(raw?.photos) ? raw.photos[0] : undefined),
+    photos: Array.isArray(raw?.photos) ? raw.photos : undefined,
+  };
 }
 
 export default function DiscoverPage() {
-  const [me, setMe] = useState<any>(null);
-  const [feed, setFeed] = useState<FeedProfile[]>([]);
-  const [status, setStatus] = useState<string>("Loading…");
+  const router = useRouter();
 
-  // Stack index: 0 is top card.
-  const [index, setIndex] = useState(0);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [idx, setIdx] = useState(0);
+  const [busy, setBusy] = useState(false);
 
-  // Profile sheet state
-  const [selected, setSelected] = useState<FeedProfile | null>(null);
+  const [sheet, setSheet] = useState<Profile | null>(null);
 
-  // Drag state
-  const drag = useRef({
-    active: false,
-    pointerId: 0,
-    startX: 0,
-    startY: 0,
-    dx: 0,
-    dy: 0,
-    lastX: 0,
-    lastY: 0,
-    lastT: 0,
-    vx: 0,
-    vy: 0
-  });
+  // swipe
+  const startRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
 
-  const [anim, setAnim] = useState<{ x: number; y: number; rot: number; transitioning: boolean }>({
-    x: 0,
-    y: 0,
-    rot: 0,
-    transitioning: false
-  });
-
-  const top = useMemo(() => feed[index] || null, [feed, index]);
-  const next = useMemo(() => feed[index + 1] || null, [feed, index]);
+  const active = profiles[idx] || null;
+  const next = profiles[idx + 1] || null;
 
   useEffect(() => {
-    const token = loadSession();
-    if (!token) {
-      window.location.href = "/login";
-      return;
-    }
-
+    let alive = true;
     (async () => {
-      setStatus("Loading profile…");
-      const meRes = await apiGet("/api/profile/me");
-      if (!meRes?.ok) {
-        setStatus(`Profile load failed: ${meRes?.error || "unknown error"}`);
-        return;
+      try {
+        const res = await apiGet("/api/feed");
+        const arr = Array.isArray(res?.profiles) ? res.profiles : Array.isArray(res) ? res : [];
+        if (!alive) return;
+        setProfiles(arr.map(normProfile).filter(p => p.id));
+        setIdx(0);
+      } catch (e) {
+        console.error(e);
       }
-      setMe(meRes);
-
-      setStatus("Loading feed…");
-      const feedRes = await apiGet("/api/feed");
-      if (!feedRes?.ok) {
-        setStatus(`Feed load failed: ${feedRes?.error || "unknown error"}`);
-        return;
-      }
-
-      const items = Array.isArray(feedRes?.items) ? feedRes.items : Array.isArray(feedRes) ? feedRes : [];
-      setFeed(items);
-      setIndex(0);
-      setStatus(items.length ? "Ready" : "No profiles returned yet.");
     })();
+    return () => { alive = false; };
   }, []);
 
-  function logout() {
-    clearSession();
-    window.location.href = "/login";
-  }
+  const label = useMemo(() => {
+    if (!active) return "";
+    const parts = [active.name, active.age ? String(active.age) : ""].filter(Boolean).join(", ");
+    return parts || "Profile";
+  }, [active]);
 
-  async function like(uid: string) {
-    setStatus("Liking…");
-    const res = await apiPost("/api/like", { targetUid: uid });
-    if (!res?.ok) setStatus(`Like failed: ${res?.error || "unknown error"}`);
-    else setStatus("Liked.");
-  }
-
-  async function pass(uid: string) {
-    // Backend might not have /api/pass — we try, but never block UI.
-    setStatus("Passed.");
+  async function send(action: "like" | "pass", profileId: string) {
+    if (!profileId || busy) return;
+    setBusy(true);
     try {
-      await apiPost("/api/pass", { targetUid: uid });
-    } catch {
-      // ignore
+      await apiPost(`/api/${action}`, { profileId });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBusy(false);
+      setDrag({ x: 0, y: 0, active: false });
+      setIdx(v => Math.min(v + 1, profiles.length));
     }
-  }
-
-  function advance() {
-    setAnim({ x: 0, y: 0, rot: 0, transitioning: false });
-    setSelected(null);
-    setIndex((i) => Math.min(i + 1, Math.max(0, feed.length)));
   }
 
   function onPointerDown(e: React.PointerEvent) {
-    if (!top) return;
-    if (selected) return; // sheet open; stack disabled
-    if (isInteractiveTarget(e.target)) return;
-
-    const el = e.currentTarget as HTMLElement;
-    el.setPointerCapture(e.pointerId);
-
-    const t = performance.now();
-    drag.current.active = true;
-    drag.current.pointerId = e.pointerId;
-    drag.current.startX = e.clientX;
-    drag.current.startY = e.clientY;
-    drag.current.dx = 0;
-    drag.current.dy = 0;
-    drag.current.lastX = e.clientX;
-    drag.current.lastY = e.clientY;
-    drag.current.lastT = t;
-    drag.current.vx = 0;
-    drag.current.vy = 0;
-
-    setAnim((a) => ({ ...a, transitioning: false }));
+    if (!active || sheet) return;
+    (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    startRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
+    setDrag({ x: 0, y: 0, active: true });
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    if (!drag.current.active) return;
-    if (e.pointerId !== drag.current.pointerId) return;
-
-    const t = performance.now();
-    const dx = e.clientX - drag.current.startX;
-    const dy = e.clientY - drag.current.startY;
-
-    // velocity (simple)
-    const dt = Math.max(1, t - drag.current.lastT);
-    drag.current.vx = (e.clientX - drag.current.lastX) / dt;
-    drag.current.vy = (e.clientY - drag.current.lastY) / dt;
-
-    drag.current.dx = dx;
-    drag.current.dy = dy;
-    drag.current.lastX = e.clientX;
-    drag.current.lastY = e.clientY;
-    drag.current.lastT = t;
-
-    // Rotate based on horizontal drag; clamp so it doesn't go crazy.
-    const rot = clamp(dx / 18, -12, 12);
-
-    setAnim({ x: dx, y: dy, rot, transitioning: false });
+    if (!startRef.current || !drag.active || sheet) return;
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+    setDrag({ x: dx, y: dy, active: true });
   }
 
-  async function onPointerUp(e: React.PointerEvent) {
-    if (!drag.current.active) return;
-    if (e.pointerId !== drag.current.pointerId) return;
-
-    drag.current.active = false;
-
-    const dx = drag.current.dx;
-    const dy = drag.current.dy;
-    const vx = drag.current.vx;
-    const vy = drag.current.vy;
+  async function onPointerUp() {
+    if (!startRef.current || sheet) return;
+    const dx = drag.x;
+    const dy = drag.y;
+    startRef.current = null;
 
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
 
-    // Thresholds
-    const SWIPE_X = 110; // px
-    const SWIPE_UP = -120; // dy < this means "open"
-    const SWIPE_DOWN_SHEET = 120;
-
-    // If mostly vertical UP and not too horizontal, open sheet
-    if (dy < SWIPE_UP && absX < 70) {
-      setSelected(top);
-      setAnim({ x: 0, y: 0, rot: 0, transitioning: true });
+    // Up swipe opens sheet
+    if (dy < -120 && absY > absX) {
+      setSheet(active);
+      setDrag({ x: 0, y: 0, active: false });
       return;
     }
 
-    // Like / Pass by swipe left/right
-    if (dx > SWIPE_X || (vx > 0.6 && absX > 40)) {
-      // Swipe right = like
-      const uid = getUid(top);
-      setAnim({ x: 500, y: dy, rot: 12, transitioning: true });
-      if (uid) await like(uid);
-      setTimeout(advance, 180);
-      return;
-    }
+    // Left / right swipe
+    if (dx > 140) return send("like", active?.id || "");
+    if (dx < -140) return send("pass", active?.id || "");
 
-    if (dx < -SWIPE_X || (vx < -0.6 && absX > 40)) {
-      // Swipe left = pass
-      const uid = getUid(top);
-      setAnim({ x: -500, y: dy, rot: -12, transitioning: true });
-      if (uid) await pass(uid);
-      setTimeout(advance, 180);
-      return;
-    }
-
-    // Snap back
-    setAnim({ x: 0, y: 0, rot: 0, transitioning: true });
+    setDrag({ x: 0, y: 0, active: false });
   }
 
-  // Sheet swipe-down to close
-  const sheetDrag = useRef({ active: false, startY: 0, dy: 0, pointerId: 0 });
-
-  function sheetPointerDown(e: React.PointerEvent) {
-    const el = e.currentTarget as HTMLElement;
-    el.setPointerCapture(e.pointerId);
-    sheetDrag.current.active = true;
-    sheetDrag.current.pointerId = e.pointerId;
-    sheetDrag.current.startY = e.clientY;
-    sheetDrag.current.dy = 0;
+  async function logout() {
+    clearSession?.();
+    router.replace("/login");
   }
-
-  function sheetPointerMove(e: React.PointerEvent) {
-    if (!sheetDrag.current.active) return;
-    if (e.pointerId !== sheetDrag.current.pointerId) return;
-    sheetDrag.current.dy = e.clientY - sheetDrag.current.startY;
-    // only allow downward drag feel
-    const y = Math.max(0, sheetDrag.current.dy);
-    const sheet = document.getElementById("ff-profile-sheet");
-    if (sheet) sheet.style.transform = `translateY(${y}px)`;
-  }
-
-  function sheetPointerUp(e: React.PointerEvent) {
-    if (!sheetDrag.current.active) return;
-    if (e.pointerId !== sheetDrag.current.pointerId) return;
-    sheetDrag.current.active = false;
-
-    const dy = sheetDrag.current.dy;
-    const sheet = document.getElementById("ff-profile-sheet");
-    if (sheet) sheet.style.transform = "translateY(0px)";
-
-    if (dy > 120) setSelected(null);
-  }
-
-  const topPhoto = top ? getPrimaryPhoto(top) : "";
-  const nextPhoto = next ? getPrimaryPhoto(next) : "";
 
   return (
-    <main style={{ padding: 24 }} className="ff-page">
-      <button className="ff-btn"
-        onClick={() => (window.location.href = "/matches")}
-        style={{ position: "fixed", top: 16, right: 96, padding: "10px 14px", zIndex: 9999 }}
+    <div className="ff-shell">
+      <div className="ff-topbar">
+        <div className="ff-topbar-left">
+          <img className="ff-logo" src="/FFmenuheaderlogo.png" alt="FrugalFetishes" />
+          <span className="ff-badge">Discover</span>
+        </div>
+
+        <div className="ff-topbar-right">
+          <button className="ff-iconbtn" onClick={() => router.push("/matches")} aria-label="Matches" title="Matches">💬</button>
+          <button className="ff-iconbtn" onClick={logout} aria-label="Logout" title="Logout">⎋</button>
+        </div>
+      </div>
+
+      <div
+        className="ff-glass"
+        style={{
+          width: "min(980px, 94vw)",
+          minHeight: 520,
+          padding: 18,
+          position: "relative",
+          overflow: "hidden",
+        }}
       >
-        Matches
-      </button>
-
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-        <div>
-          <h1 style={{ margin: 0 }}>Discover</h1>
-          <div style={{ opacity: 0.85, marginTop: 6 }}>{status}</div>
-          {me?.displayName ? (
-            <div style={{ opacity: 0.85, marginTop: 6 }}>
-              Logged in as <strong>{me.displayName}</strong>
-              {me.city ? <> · {me.city}</> : null}
-            </div>
-          ) : null}
-        </div>
-
-        <button className="ff-btn" onClick={logout} style={{ padding: "10px 14px" }}>
-          Logout
-        </button>
-      </div>
-
-      {/* Card Stack */}
-      <div style={{ marginTop: 18, display: "flex", justifyContent: "center" }}>
-        <div style={{ position: "relative", width: "min(520px, 92vw)", height: "72vh", maxHeight: 640 }}>
-          {/* Next card (behind) */}
-          {next ? (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                borderRadius: 18,
-                border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.05)",
-                transform: "scale(0.97) translateY(10px)",
-                transition: "transform 180ms ease-out",
-                overflow: "hidden"
-              }}
-            >
-              {nextPhoto ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={nextPhoto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
-              ) : null}
-              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0.05))" }} />
-              <div style={{ position: "absolute", left: 14, bottom: 14 }}>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>{next.displayName || "Unknown"}</div>
-                <div style={{ opacity: 0.85 }}>{next.city || ""}</div>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Top card */}
-          {top ? (
-            <div
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              style={{
-                position: "absolute",
-                inset: 0,
-                borderRadius: 18,
-                border: "1px solid rgba(255,255,255,0.16)",
-                background: "rgba(255,255,255,0.06)",
-                overflow: "hidden",
-                touchAction: "none",
-                cursor: "grab",
-                transform: `translate(${anim.x}px, ${anim.y}px) rotate(${anim.rot}deg)`,
-                transition: anim.transitioning ? "transform 180ms ease-out" : "none",
-                boxShadow: "0 18px 60px rgba(0,0,0,0.55)"
-              }}
-            >
-              {topPhoto ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={topPhoto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : null}
-
-              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.06))" }} />
-
-              {/* Like/Nope indicators */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: 16,
-                  left: 16,
-                  padding: "8px 12px",
-                  border: "2px solid rgba(0,255,170,0.8)",
-                  color: "rgba(0,255,170,0.9)",
-                  borderRadius: 10,
-                  fontWeight: 900,
-                  letterSpacing: 1,
-                  transform: `rotate(-12deg)`,
-                  opacity: clamp(anim.x / 120, 0, 1)
-                }}
-              >
-                LIKE
-              </div>
-
-              <div
-                style={{
-                  position: "absolute",
-                  top: 16,
-                  right: 16,
-                  padding: "8px 12px",
-                  border: "2px solid rgba(255,80,80,0.8)",
-                  color: "rgba(255,80,80,0.9)",
-                  borderRadius: 10,
-                  fontWeight: 900,
-                  letterSpacing: 1,
-                  transform: `rotate(12deg)`,
-                  opacity: clamp((-anim.x) / 120, 0, 1)
-                }}
-              >
-                NOPE
-              </div>
-
-              {/* Bottom info */}
-              <div style={{ position: "absolute", left: 16, right: 16, bottom: 16 }}>
-                <div style={{ fontSize: 26, fontWeight: 900 }}>
-                  {top.displayName || "Unknown"}
-                  {typeof top.age === "number" ? `, ${top.age}` : ""}
-                </div>
-                <div style={{ opacity: 0.9 }}>{top.city || ""}</div>
-
-                <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-                  <button className="ff-btn"
-                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const uid = getUid(top);
-                      setAnim({ x: -500, y: 0, rot: -12, transitioning: true });
-                      if (uid) pass(uid);
-                      setTimeout(advance, 180);
-                    }}
-                    style={{ padding: "10px 14px" }}
-                  >
-                    Pass
-                  </button>
-
-                  <button className="ff-btn"
-                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setSelected(top);
-                    }}
-                    style={{ padding: "10px 14px" }}
-                  >
-                    View
-                  </button>
-
-                  <button className="ff-btn"
-                    onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const uid = getUid(top);
-                      setAnim({ x: 500, y: 0, rot: 12, transitioning: true });
-                      if (uid) like(uid);
-                      setTimeout(advance, 180);
-                    }}
-                    style={{ padding: "10px 14px" }}
-                  >
-                    Like
-                  </button>
-                </div>
-
-                <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-                  Swipe: left=pass · right=like · up=view profile
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                borderRadius: 18,
-                border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.04)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: 0.9
-              }}
-            >
-              No more profiles.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Slide-up Profile Sheet */}
-      {selected ? (
-        <div
-          onClick={() => setSelected(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "flex-end",
-            zIndex: 50
-          }}
-        >
+        <div style={{ display: "flex", gap: 16, alignItems: "stretch", justifyContent: "space-between" }}>
+          {/* art side */}
           <div
-            id="ff-profile-sheet"
-            onClick={(e) => e.stopPropagation()}
-            onPointerDown={sheetPointerDown}
-            onPointerMove={sheetPointerMove}
-            onPointerUp={sheetPointerUp}
             style={{
-              width: "min(900px, 100%)",
-              maxHeight: "90vh",
-              background: "rgba(20,20,20,0.98)",
-              borderTopLeftRadius: 18,
-              borderTopRightRadius: 18,
-              border: "1px solid rgba(255,255,255,0.12)",
-              padding: 16,
-              touchAction: "none"
+              flex: 1,
+              minHeight: 460,
+              borderRadius: 22,
+              position: "relative",
+              overflow: "hidden",
+              background:
+                "radial-gradient(700px 500px at 22% 28%, rgba(255,79,163,.22), transparent 60%), radial-gradient(700px 500px at 80% 60%, rgba(124,58,237,.20), transparent 60%), rgba(0,0,0,.18)",
+              border: "1px solid rgba(255,255,255,.10)",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>
-                {selected.displayName || "Profile"}
-                {typeof selected.age === "number" ? `, ${selected.age}` : ""}
-              </div>
-              <button className="ff-btn" onClick={() => setSelected(null)} style={{ padding: "8px 12px" }}>
-                Close
-              </button>
-            </div>
+            {/* decorative circles */}
+            <div style={{ position: "absolute", top: 24, left: 24, width: 96, height: 96, borderRadius: 999, border: "2px solid rgba(255,255,255,.14)" }} />
+            <div style={{ position: "absolute", bottom: 26, right: 26, width: 56, height: 56, borderRadius: 999, border: "2px solid rgba(255,255,255,.10)" }} />
 
-            <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-              Swipe down to close
-            </div>
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+              <div style={{ textAlign: "center" }}>
+                <img
+                  src={active?.photoUrl || "/frugalfetishes.png"}
+                  alt={label}
+                  style={{
+                    width: 320,
+                    height: 420,
+                    objectFit: "cover",
+                    borderRadius: 22,
+                    border: "1px solid rgba(255,255,255,.18)",
+                    boxShadow: "0 26px 70px rgba(0,0,0,.55)",
+                    transform: sheet ? "scale(.98)" : `translate(${drag.x}px, ${drag.y}px) rotate(${drag.x * 0.04}deg)`,
+                    transition: drag.active ? "none" : "transform 180ms ease",
+                    touchAction: "none",
+                    userSelect: "none",
+                  }}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerCancel={onPointerUp}
+                />
 
-            <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
-              <div style={{ width: "100%", height: 360, borderRadius: 14, overflow: "hidden", background: "rgba(255,255,255,0.06)" }}>
-                {getPrimaryPhoto(selected) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={getPrimaryPhoto(selected)}
-                    alt={selected.displayName || "Profile"}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : null}
-              </div>
-
-              <div style={{ opacity: 0.9 }}>
-                {selected.city ? (
-                  <div>
-                    <strong>City:</strong> {selected.city}
-                  </div>
-                ) : null}
-                {selected.bio ? <div style={{ marginTop: 8 }}>{selected.bio}</div> : null}
-              </div>
-
-              {Array.isArray(selected.interests) && selected.interests.length ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {selected.interests.map((t, i) => (
-                    <span
-                      key={`${t}-${i}`}
-                      style={{
-                        fontSize: 12,
-                        padding: "6px 10px",
-                        borderRadius: 999,
-                        border: "1px solid rgba(255,255,255,0.18)",
-                        background: "rgba(255,255,255,0.06)"
-                      }}
-                    >
-                      {t}
-                    </span>
-                  ))}
+                <div style={{ marginTop: 12, fontWeight: 900 }}>{label}</div>
+                <div className="ff-subtle" style={{ fontSize: 13 }}>
+                  Swipe: left=pass • right=like • up=view
                 </div>
-              ) : null}
-
-              <div style={{ display: "flex", gap: 10 }}>
-                <button className="ff-btn"
-                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={async () => {
-                    const uid = getUid(selected);
-                    if (uid) await like(uid);
-                    setSelected(null);
-                    setTimeout(advance, 120);
-                  }}
-                  style={{ padding: "10px 14px" }}
-                >
-                  Like
-                </button>
-                <button className="ff-btn"
-                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={async () => {
-                    const uid = getUid(selected);
-                    if (uid) await pass(uid);
-                    setSelected(null);
-                    setTimeout(advance, 120);
-                  }}
-                  style={{ padding: "10px 14px" }}
-                >
-                  Pass
-                </button>
-                <button className="ff-btn" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }} onClick={() => setSelected(null)} style={{ padding: "10px 14px" }}>
-                  Back
-                </button>
               </div>
+            </div>
+
+            {/* next card shadow */}
+            {next ? (
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", opacity: 0.35, pointerEvents: "none" }}>
+                <div
+                  style={{
+                    width: 300,
+                    height: 400,
+                    borderRadius: 22,
+                    border: "1px solid rgba(255,255,255,.10)",
+                    background: "rgba(0,0,0,.18)",
+                    transform: "translate(22px, 18px)",
+                    filter: "blur(0.2px)",
+                  }}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {/* controls side */}
+          <div style={{ width: 340, display: "flex", flexDirection: "column", gap: 12 }}>
+            <h2 className="ff-title" style={{ fontSize: 34, margin: "6px 0 0" }}>Find your match</h2>
+            <div className="ff-subtle" style={{ fontSize: 13, lineHeight: 1.35 }}>
+              Keep it playful. Swipe, peek, and see who clicks.
+            </div>
+
+            <div style={{ height: 10 }} />
+
+            <div className="ff-pillrow">
+              <button className="ff-pill" onClick={() => active && send("pass", active.id)} aria-label="Pass" title="Pass">❌</button>
+              <button className="ff-pill" onClick={() => active && setSheet(active)} aria-label="View" title="View">👁️</button>
+              <button className="ff-pill ff-pillPrimary" onClick={() => active && send("like", active.id)} aria-label="Like" title="Like">❤️</button>
+            </div>
+
+            <div className="ff-subtle" style={{ fontSize: 12, textAlign: "center" }}>
+              Tip: you can still click the picture, then swipe.
+            </div>
+
+            <div style={{ flex: 1 }} />
+
+            <div className="ff-subtle" style={{ fontSize: 12, textAlign: "center" }}>
+              Profiles shown are dev data. Matches appear after mutual likes.
             </div>
           </div>
         </div>
-      ) : null}
-    </main>
+
+        {/* sheet */}
+        {sheet ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(0,0,0,.62)",
+              display: "grid",
+              placeItems: "center",
+              padding: 18,
+              zIndex: 10,
+            }}
+            onClick={() => setSheet(null)}
+          >
+            <div
+              className="ff-glass"
+              style={{ width: "min(880px, 94vw)", padding: 18, display: "grid", gap: 12 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <img className="ff-avatar" src={sheet.photoUrl || "/frugalfetishes.png"} alt={sheet.name || "Profile"} />
+                  <div>
+                    <div style={{ fontWeight: 900 }}>{sheet.name} {sheet.age ? `, ${sheet.age}` : ""}</div>
+                    <div className="ff-subtle" style={{ fontSize: 12 }}>{sheet.city || ""}</div>
+                  </div>
+                </div>
+                <button className="ff-iconbtn" onClick={() => setSheet(null)} aria-label="Close" title="Close">✕</button>
+              </div>
+
+              <div className="ff-subtle" style={{ lineHeight: 1.5 }}>
+                {sheet.bio || "No bio yet."}
+              </div>
+
+              <div className="ff-pillrow" style={{ justifyContent: "flex-end" }}>
+                <button className="ff-pill" onClick={() => active && send("pass", active.id)} aria-label="Pass" title="Pass">❌</button>
+                <button className="ff-pill ff-pillPrimary" onClick={() => active && send("like", active.id)} aria-label="Like" title="Like">❤️</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* empty */}
+        {!active ? (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 6 }}>No more profiles</div>
+              <div className="ff-subtle" style={{ fontSize: 13 }}>Seed more dev users, then refresh.</div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
