@@ -1,165 +1,227 @@
 "use client";
 
-import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
 import { startOTP, verifyOTP } from "@/lib/auth";
+import { getSession, clearSession } from "@/lib/session";
 
 export default function LoginPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [message, setMessage] = useState<string>("");
-  const [error, setError] = useState<string>("");
+
+  const [status, setStatus] = useState<string>("");
   const [devOtp, setDevOtp] = useState<string>("");
 
-  const canSend = useMemo(() => email.trim().length > 3 && email.includes("@"), [email]);
-  const canVerify = useMemo(() => email.trim().length > 3 && otp.trim().length >= 4, [email, otp]);
+  // If you're already logged in, skip login.
+  useEffect(() => {
+    const token = getSession();
+    if (token) router.replace("/discover");
+  }, [router]);
 
-  const onSend = useCallback(async () => {
+  const canSend = useMemo(() => email.trim().length > 3 && email.includes("@"), [email]);
+  const canVerify = useMemo(() => canSend && otp.trim().length >= 4, [canSend, otp]);
+
+  async function onSendOtp() {
     if (!canSend || sending) return;
-    setError("");
-    setMessage("");
-    setDevOtp("");
     setSending(true);
+    setStatus("");
+    setDevOtp("");
+
     try {
-      const res: any = await startOTP(email.trim());
+      const res = await startOTP(email.trim());
+
       if (res?.ok) {
-        setMessage("OTP sent. Enter the code.");
-        if (res?.devOtp) {
-          setDevOtp(String(res.devOtp));
-          setMessage("DEV OTP enabled (testing). Enter the code below.");
-        }
+        setStatus("OTP sent. Enter the code.");
+        if (res?.devOtp) setDevOtp(String(res.devOtp));
       } else {
-        setError(res?.error || res?.message || "Auth start failed.");
+        const msg = res?.error || res?.message || "Failed to start OTP.";
+        setStatus(String(msg));
       }
     } catch (e: any) {
-      setError(e?.message || "Auth start failed.");
+      setStatus(e?.message ? String(e.message) : "Failed to start OTP.");
     } finally {
       setSending(false);
     }
-  }, [canSend, sending, email]);
+  }
 
-  const onVerify = useCallback(async () => {
+  async function onVerify() {
     if (!canVerify || verifying) return;
-    setError("");
-    setMessage("");
     setVerifying(true);
+    setStatus("");
+
     try {
-      const res: any = await verifyOTP(email.trim(), otp.trim());
+      const res = await verifyOTP(email.trim(), otp.trim());
+
       if (res?.ok) {
-        router.push("/discover");
+        setStatus("Signed in.");
+        router.replace("/discover");
       } else {
-        setError(res?.error || res?.message || "Verify failed.");
+        const msg = res?.error || res?.message || "Verify failed.";
+        setStatus(String(msg));
       }
     } catch (e: any) {
-      setError(e?.message || "Verify failed.");
+      setStatus(e?.message ? String(e.message) : "Verify failed.");
     } finally {
       setVerifying(false);
     }
-  }, [canVerify, verifying, email, otp, router]);
+  }
+
+  function onKeyDownEmail(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onSendOtp();
+    }
+  }
+
+  function onKeyDownOtp(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onVerify();
+    }
+  }
+
+  // Dummy alternate sign-in handlers (UI only for now)
+  function onAltSignin(provider: string) {
+    setStatus(`${provider} sign-in coming soon.`);
+  }
+
+  function onClear() {
+    clearSession();
+    setEmail("");
+    setOtp("");
+    setDevOtp("");
+    setStatus("Cleared session.");
+  }
 
   return (
-    <main style={styles.page}>
-      <div style={styles.bgGlow} aria-hidden />
+    <div style={styles.page}>
+      <div style={styles.bgGlow1} />
+      <div style={styles.bgGlow2} />
+
       <div style={styles.shell}>
-        {/* Left: Branding */}
-        <section style={styles.brandPanel}>
-          <div style={styles.brandImageWrap}>
-            <Image
-              src="/frugalfetishes.png"
+        <div style={styles.hero}>
+          <div style={styles.brandWrap}>
+            <img
+              src="/public/frugalfetishes.png"
               alt="FrugalFetishes"
-              fill
-              priority
-              sizes="(max-width: 900px) 60vw, 520px"
-              style={{ objectFit: "contain" }}
+              style={styles.brandImg}
+              onError={(e) => {
+                // fallback if your logo is at /frugalfetishes.png (common in Next public/)
+                (e.currentTarget as HTMLImageElement).src = "/frugalfetishes.png";
+              }}
             />
           </div>
-          <div style={styles.brandTagline}>
-            Find your match — the FrugalFetishes way.
+
+          <div style={styles.heroCopy}>
+            <div style={styles.heroTitle}>Find your match — the FrugalFetishes way</div>
+            <div style={styles.heroSub}>
+              Fast OTP login for now. We’ll add real providers (Google/Apple/etc) after the core flow is solid.
+            </div>
+
+            <div style={styles.heroFooter}>
+              <button type="button" style={styles.smallGhost} onClick={onClear}>
+                Clear session
+              </button>
+            </div>
           </div>
-        </section>
+        </div>
 
-        {/* Right: Login */}
-        <section style={styles.card} aria-label="Login">
-          <h1 style={styles.h1}>Welcome</h1>
-          <p style={styles.sub}>Log in with your email to continue.</p>
+        <div style={styles.formSide}>
+          <div style={styles.formHeader}>
+            <div style={styles.welcome}>Welcome</div>
+            <div style={styles.welcomeSub}>Enter your email to receive a one-time code.</div>
+          </div>
 
-          <div style={styles.field}>
-            <label style={styles.label} htmlFor="email">Email</label>
+          <div style={styles.form}>
+            <label style={styles.label}>Email</label>
             <input
-              id="email"
-              style={styles.input}
-              placeholder="test@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  onSend();
-                }
-              }}
+              onKeyDown={onKeyDownEmail}
+              placeholder="you@example.com"
+              style={styles.input}
               autoComplete="email"
               inputMode="email"
             />
-          </div>
 
-          <button
-            type="button"
-            style={{ ...styles.btn, ...(sending ? styles.btnDisabled : null) }}
-            disabled={!canSend || sending}
-            onClick={onSend}
-          >
-            {sending ? "Sending..." : "Send OTP"}
-          </button>
+            <button
+              type="button"
+              onClick={onSendOtp}
+              disabled={!canSend || sending}
+              style={{
+                ...styles.primaryBtn,
+                ...(canSend && !sending ? {} : styles.btnDisabled),
+              }}
+            >
+              {sending ? "Sending…" : "Send OTP"}
+            </button>
 
-          <div style={styles.field}>
-            <label style={styles.label} htmlFor="otp">OTP code</label>
+            <div style={styles.dividerRow}>
+              <div style={styles.dividerLine} />
+              <div style={styles.dividerText}>then</div>
+              <div style={styles.dividerLine} />
+            </div>
+
+            <label style={styles.label}>OTP code</label>
             <input
-              id="otp"
-              style={styles.input}
-              placeholder="123456"
               value={otp}
               onChange={(e) => setOtp(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  onVerify();
-                }
-              }}
+              onKeyDown={onKeyDownOtp}
+              placeholder="123456"
+              style={styles.input}
               autoComplete="one-time-code"
               inputMode="numeric"
             />
-          </div>
 
-          <button
-            type="button"
-            style={{ ...styles.btnSecondary, ...(verifying ? styles.btnDisabled : null) }}
-            disabled={!canVerify || verifying}
-            onClick={onVerify}
-          >
-            {verifying ? "Verifying..." : "Verify + Sign In"}
-          </button>
+            <button
+              type="button"
+              onClick={onVerify}
+              disabled={!canVerify || verifying}
+              style={{
+                ...styles.secondaryBtn,
+                ...(canVerify && !verifying ? {} : styles.btnDisabled),
+              }}
+            >
+              {verifying ? "Verifying…" : "Verify / Sign In"}
+            </button>
 
-          {devOtp ? (
-            <div style={styles.devBox} role="note">
-              <div style={styles.devTitle}>DEV OTP (testing)</div>
-              <div style={styles.devCode}>{devOtp}</div>
+            {devOtp ? (
+              <div style={styles.devBox}>
+                <div style={styles.devTitle}>DEV OTP (testing)</div>
+                <div style={styles.devCode}>{devOtp}</div>
+                <div style={styles.devHint}>Use this code if email delivery isn’t configured yet.</div>
+              </div>
+            ) : null}
+
+            {status ? <div style={styles.status}>{status}</div> : null}
+
+            <div style={styles.altRow}>
+              <div style={styles.altOr}>OR</div>
+              <div style={styles.altButtons}>
+                <button type="button" style={styles.altBtn} onClick={() => onAltSignin("Google")}>
+                  <span style={styles.altIcon}>G</span> Google
+                </button>
+                <button type="button" style={styles.altBtn} onClick={() => onAltSignin("Apple")}>
+                  <span style={styles.altIcon}></span> Apple
+                </button>
+                <button type="button" style={styles.altBtn} onClick={() => onAltSignin("Facebook")}>
+                  <span style={styles.altIcon}>f</span> Facebook
+                </button>
+              </div>
             </div>
-          ) : null}
 
-          {message ? <div style={styles.msg}>{message}</div> : null}
-          {error ? <div style={styles.err}>{error}</div> : null}
-
-          <div style={styles.hint}>
-            Tip: you can press <b>Enter</b> in Email to send OTP, and <b>Enter</b> in OTP to verify.
+            <div style={styles.miniNote}>
+              Don’t have an account? (We’ll add registration UI next — right now you can create users in Firebase.)
+            </div>
           </div>
-        </section>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -169,117 +231,301 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     placeItems: "center",
     padding: 24,
-    background:
-      "radial-gradient(1200px 800px at 20% 20%, rgba(255,0,126,0.20), transparent 55%), radial-gradient(900px 700px at 70% 40%, rgba(124,58,237,0.22), transparent 60%), radial-gradient(1000px 900px at 40% 85%, rgba(0,255,209,0.12), transparent 60%), #07020a",
-    color: "white",
+    background: "radial-gradient(1200px 700px at 20% 15%, rgba(180, 80, 255, 0.45), rgba(0,0,0,0)), radial-gradient(1000px 600px at 80% 10%, rgba(255, 80, 180, 0.35), rgba(0,0,0,0)), linear-gradient(135deg, #0a0413 0%, #150628 35%, #0b0416 100%)",
+    color: "#fff",
     position: "relative",
     overflow: "hidden",
   },
-  bgGlow: {
+
+  bgGlow1: {
     position: "absolute",
-    inset: -60,
-    background:
-      "radial-gradient(600px 500px at 15% 30%, rgba(255,58,120,0.18), transparent 60%), radial-gradient(650px 520px at 80% 35%, rgba(124,58,237,0.16), transparent 62%), radial-gradient(700px 600px at 35% 85%, rgba(34,211,238,0.10), transparent 60%)",
-    filter: "blur(12px)",
+    inset: "-40% auto auto -30%",
+    width: 700,
+    height: 700,
+    filter: "blur(60px)",
+    background: "radial-gradient(circle at 30% 30%, rgba(255, 92, 190, 0.55), rgba(0,0,0,0) 60%)",
     pointerEvents: "none",
   },
+  bgGlow2: {
+    position: "absolute",
+    inset: "auto -35% -45% auto",
+    width: 900,
+    height: 900,
+    filter: "blur(70px)",
+    background: "radial-gradient(circle at 60% 60%, rgba(120, 80, 255, 0.5), rgba(0,0,0,0) 60%)",
+    pointerEvents: "none",
+  },
+
   shell: {
-    width: "min(980px, 100%)",
+    width: "min(1120px, 100%)",
     display: "grid",
-    gridTemplateColumns: "1.1fr 0.9fr",
+    gridTemplateColumns: "1.2fr 0.8fr",
     gap: 18,
     padding: 18,
-    borderRadius: 22,
-    background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.12)",
-    boxShadow: "0 30px 90px rgba(0,0,0,0.55)",
+    borderRadius: 28,
+    background: "linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.05))",
+    border: "1px solid rgba(255,255,255,0.14)",
+    boxShadow: "0 30px 90px rgba(0,0,0,0.50)",
     backdropFilter: "blur(10px)",
   },
-  brandPanel: {
-    minHeight: 420,
-    borderRadius: 18,
-    background: "rgba(0,0,0,0.20)",
+
+  hero: {
+    borderRadius: 22,
+    position: "relative",
+    padding: 22,
+    overflow: "hidden",
+    background: "radial-gradient(900px 500px at 10% 30%, rgba(255, 80, 170, 0.25), rgba(0,0,0,0)), radial-gradient(800px 500px at 90% 10%, rgba(120, 80, 255, 0.22), rgba(0,0,0,0)), linear-gradient(180deg, rgba(0,0,0,0.28), rgba(0,0,0,0.42))",
     border: "1px solid rgba(255,255,255,0.10)",
-    padding: 18,
+    minHeight: 520,
     display: "grid",
     gridTemplateRows: "1fr auto",
-    gap: 10,
-    overflow: "hidden",
   },
-  brandImageWrap: {
-    position: "relative",
-    width: "100%",
-    height: 320,
-    borderRadius: 16,
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
+
+  brandWrap: {
     display: "grid",
     placeItems: "center",
-    overflow: "hidden",
+    padding: "12px 10px 0 10px",
   },
-  brandTagline: {
-    fontSize: 12,
-    opacity: 0.8,
-    paddingLeft: 6,
+
+  brandImg: {
+    width: "min(520px, 92%)",
+    height: "auto",
+    filter: "drop-shadow(0 18px 40px rgba(0,0,0,0.55))",
+    transform: "translateY(-4px)",
   },
-  card: {
-    borderRadius: 18,
-    background: "linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05))",
-    border: "1px solid rgba(255,255,255,0.14)",
-    padding: 18,
+
+  heroCopy: {
+    padding: "18px 8px 6px 8px",
     display: "grid",
     gap: 10,
-    alignContent: "start",
-    minHeight: 420,
+    alignContent: "end",
   },
-  h1: { margin: 0, fontSize: 22, letterSpacing: 0.2 },
-  sub: { margin: 0, opacity: 0.8, fontSize: 13 },
-  field: { display: "grid", gap: 6, marginTop: 6 },
-  label: { fontSize: 12, opacity: 0.85 },
-  input: {
-    height: 40,
-    padding: "0 12px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.16)",
-    outline: "none",
-    background: "rgba(0,0,0,0.25)",
-    color: "white",
+
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: 800,
+    letterSpacing: 0.2,
+    color: "rgba(255,255,255,0.92)",
+    textShadow: "0 10px 30px rgba(0,0,0,0.55)",
   },
-  btn: {
-    height: 40,
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "linear-gradient(90deg, rgba(255,0,126,0.92), rgba(124,58,237,0.92))",
-    color: "white",
-    fontWeight: 700,
-    cursor: "pointer",
-    marginTop: 8,
+
+  heroSub: {
+    fontSize: 14,
+    lineHeight: 1.45,
+    color: "rgba(255,255,255,0.72)",
+    maxWidth: 520,
   },
-  btnSecondary: {
-    height: 40,
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(255,255,255,0.08)",
-    color: "white",
-    fontWeight: 700,
-    cursor: "pointer",
+
+  heroFooter: {
+    display: "flex",
+    justifyContent: "flex-start",
+    gap: 10,
     marginTop: 6,
   },
+
+  smallGhost: {
+    borderRadius: 999,
+    padding: "9px 12px",
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "rgba(0,0,0,0.18)",
+    color: "rgba(255,255,255,0.85)",
+    cursor: "pointer",
+    fontSize: 12,
+  },
+
+  formSide: {
+    borderRadius: 22,
+    padding: 22,
+    background: "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.10))",
+    border: "1px solid rgba(255,255,255,0.12)",
+    display: "grid",
+    alignContent: "start",
+    minHeight: 520,
+  },
+
+  formHeader: {
+    display: "grid",
+    gap: 6,
+    marginBottom: 14,
+  },
+
+  welcome: {
+    fontSize: 34,
+    fontWeight: 900,
+    letterSpacing: 0.2,
+    background: "linear-gradient(90deg, rgba(255, 88, 190, 0.95), rgba(160, 110, 255, 0.95))",
+    WebkitBackgroundClip: "text",
+    backgroundClip: "text",
+    color: "transparent",
+  },
+
+  welcomeSub: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.70)",
+    lineHeight: 1.4,
+  },
+
+  form: {
+    display: "grid",
+    gap: 10,
+    marginTop: 8,
+  },
+
+  label: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.72)",
+    marginTop: 6,
+  },
+
+  input: {
+    width: "100%",
+    borderRadius: 14,
+    padding: "12px 14px",
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(10, 6, 18, 0.50)",
+    color: "rgba(255,255,255,0.92)",
+    outline: "none",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+  },
+
+  primaryBtn: {
+    borderRadius: 14,
+    padding: "12px 14px",
+    border: "1px solid rgba(255, 80, 170, 0.35)",
+    background: "linear-gradient(90deg, rgba(255, 80, 170, 0.85), rgba(160, 110, 255, 0.85))",
+    color: "#14021f",
+    fontWeight: 900,
+    cursor: "pointer",
+    marginTop: 4,
+  },
+
+  secondaryBtn: {
+    borderRadius: 14,
+    padding: "12px 14px",
+    border: "1px solid rgba(255,255,255,0.16)",
+    background: "rgba(255,255,255,0.10)",
+    color: "rgba(255,255,255,0.92)",
+    fontWeight: 800,
+    cursor: "pointer",
+    marginTop: 4,
+  },
+
   btnDisabled: {
-    opacity: 0.6,
+    opacity: 0.55,
     cursor: "not-allowed",
   },
+
+  dividerRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto 1fr",
+    alignItems: "center",
+    gap: 10,
+    margin: "10px 0 2px 0",
+  },
+
+  dividerLine: {
+    height: 1,
+    background: "rgba(255,255,255,0.14)",
+  },
+
+  dividerText: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.55)",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+
   devBox: {
     marginTop: 10,
-    padding: 12,
-    borderRadius: 12,
-    border: "1px dashed rgba(255,255,255,0.20)",
+    borderRadius: 16,
+    border: "1px solid rgba(255, 80, 170, 0.25)",
     background: "rgba(0,0,0,0.25)",
+    padding: "12px 12px",
+    display: "grid",
+    gap: 6,
   },
-  devTitle: { fontSize: 12, opacity: 0.85 },
-  devCode: { fontSize: 20, fontWeight: 800, letterSpacing: 2, marginTop: 4 },
-  msg: { marginTop: 8, fontSize: 12, opacity: 0.9 },
-  err: { marginTop: 8, fontSize: 12, color: "#ff9ab8" },
-  hint: { marginTop: 10, fontSize: 11, opacity: 0.75, lineHeight: 1.35 },
-};
 
+  devTitle: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.78)",
+    fontWeight: 800,
+  },
+
+  devCode: {
+    fontSize: 22,
+    fontWeight: 900,
+    letterSpacing: 2,
+    color: "rgba(255, 170, 225, 0.95)",
+  },
+
+  devHint: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.62)",
+  },
+
+  status: {
+    marginTop: 10,
+    padding: "10px 12px",
+    borderRadius: 14,
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.20)",
+    fontSize: 13,
+    color: "rgba(255,255,255,0.82)",
+    lineHeight: 1.35,
+    wordBreak: "break-word",
+  },
+
+  altRow: {
+    marginTop: 10,
+    display: "grid",
+    gap: 10,
+  },
+
+  altOr: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.55)",
+    textAlign: "center",
+    letterSpacing: 1.2,
+  },
+
+  altButtons: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
+    gap: 10,
+  },
+
+  altBtn: {
+    borderRadius: 14,
+    padding: "10px 10px",
+    border: "1px solid rgba(255,255,255,0.14)",
+    background: "rgba(0,0,0,0.18)",
+    color: "rgba(255,255,255,0.90)",
+    cursor: "pointer",
+    fontWeight: 800,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    fontSize: 12,
+  },
+
+  altIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    display: "grid",
+    placeItems: "center",
+    background: "rgba(255,255,255,0.12)",
+    color: "rgba(255,255,255,0.90)",
+    fontWeight: 900,
+    fontSize: 12,
+    lineHeight: "18px",
+  },
+
+  miniNote: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "rgba(255,255,255,0.60)",
+    lineHeight: 1.45,
+  },
+};
