@@ -1,112 +1,96 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { clearSession } from "@/lib/session";
+import { requireAuthOrRedirect } from "@/lib/session";
+import { useRouter } from "next/navigation";
 
 type Match = {
   id: string;
   name?: string;
+  age?: number;
   photoUrl?: string;
   lastMessage?: string;
 };
 
-function normMatch(raw: any): Match {
-  return {
-    id: String(raw?.id || raw?._id || raw?.matchId || raw?.chatId || ""),
-    name: raw?.name ?? raw?.displayName ?? raw?.username ?? "Match",
-    photoUrl: raw?.photoUrl ?? raw?.photo ?? raw?.avatarUrl ?? raw?.otherPhotoUrl ?? "/frugalfetishes.png",
-    lastMessage: raw?.lastMessage ?? raw?.snippet ?? "",
-  };
-}
-
 export default function MatchesPage() {
   const router = useRouter();
-  const [items, setItems] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
-    let alive = true;
+    requireAuthOrRedirect(router);
     (async () => {
       try {
         const res = await apiGet("/api/matches");
-        const arr = Array.isArray(res?.matches) ? res.matches : Array.isArray(res) ? res : [];
-        if (!alive) return;
-        setItems(arr.map(normMatch).filter(m => m.id));
-      } catch (e) {
-        console.error(e);
+        const list = Array.isArray(res?.matches) ? res.matches : Array.isArray(res) ? res : [];
+        setMatches(list);
+      } catch (e: any) {
+        setStatus(e?.message ? String(e.message) : "Failed to load matches.");
       } finally {
-        if (alive) setLoading(false);
+        setLoading(false);
       }
     })();
-    return () => { alive = false; };
-  }, []);
-
-  function logout() {
-    clearSession?.();
-    router.replace("/login");
-  }
+  }, [router]);
 
   return (
-    <div className="ff-shell">
-      <div className="ff-topbar">
-        <div className="ff-topbar-left">
-          <img className="ff-logo" src="/FFmenuheaderlogo.png" alt="FrugalFetishes" />
-          <span className="ff-badge">Matches</span>
-        </div>
-        <div className="ff-topbar-right">
-          <button className="ff-iconbtn" onClick={() => router.push("/discover")} aria-label="Discover" title="Discover">🔥</button>
-          <button className="ff-iconbtn" onClick={logout} aria-label="Logout" title="Logout">⎋</button>
-        </div>
-      </div>
-
-      <div className="ff-glass ff-list">
-        <h1 className="ff-title" style={{ fontSize: 34 }}>Matches</h1>
-        <div className="ff-subtle" style={{ fontSize: 13, marginBottom: 14 }}>
-          Mutual likes show up here. Tap one to open the profile, then chat.
+    <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
+      <div style={{ width: "min(720px, 92vw)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+          <h1 style={{ margin: 0 }}>Matches</h1>
+          <div style={{ opacity: 0.75, fontSize: 13 }}>{status || (loading ? "Loading…" : `${matches.length} total`)}</div>
         </div>
 
         {loading ? (
-          <div className="ff-subtle">Loading…</div>
-        ) : items.length === 0 ? (
-          <div className="ff-row" style={{ justifyContent: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontWeight: 900 }}>No matches yet</div>
-              <div className="ff-subtle" style={{ fontSize: 13, marginTop: 6 }}>
-                Go like a few profiles. A match appears when it’s mutual.
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <button className="ff-iconbtn" onClick={() => router.push("/discover")} aria-label="Go discover" title="Go discover">🔥</button>
-              </div>
+          <div style={{ opacity: 0.85 }}>Loading…</div>
+        ) : matches.length === 0 ? (
+          <div className="panel" style={{ padding: 18 }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>No matches yet</div>
+            <div style={{ opacity: 0.8, lineHeight: 1.5 }}>
+              You’ll see people here after you like someone and they like you back (or when we enable dev auto-matches).
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <Link className="pillBtn" href="/discover">
+                Go to Discover
+              </Link>
             </div>
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {items.map((m) => (
-              <button
+          <div style={{ display: "grid", gap: 12 }}>
+            {matches.map((m) => (
+              <Link
                 key={m.id}
-                className="ff-row"
-                style={{ cursor: "pointer", textAlign: "left" }}
-                onClick={() => router.push(`/matches/${encodeURIComponent(m.id)}`)}
-                aria-label={`Open match ${m.name || ""}`}
-                title="Open"
+                href={`/matches/${m.id}`}
+                className="panel"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "64px 1fr",
+                  gap: 12,
+                  padding: 12,
+                  alignItems: "center",
+                }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                  <img className="ff-avatar" src={m.photoUrl || "/frugalfetishes.png"} alt={m.name || "Match"} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {m.name}
-                    </div>
-                    <div className="ff-subtle" style={{ fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {m.lastMessage || "Tap to view"}
-                    </div>
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 18,
+                    border: "1px solid rgba(255,255,255,.10)",
+                    background: `url(${m.photoUrl || ""}) center/cover no-repeat, rgba(255,255,255,.06)`,
+                  }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 900, fontSize: 16 }}>
+                    {m.name || "Unknown"}
+                    {typeof m.age === "number" ? `, ${m.age}` : ""}
+                  </div>
+                  <div style={{ opacity: 0.78, fontSize: 13, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {m.lastMessage || "Tap to open chat"}
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span className="ff-badge">›</span>
-                </div>
-              </button>
+              </Link>
             ))}
           </div>
         )}
