@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
-import { clearSession, loadSession } from "@/lib/session";
+import { clearSession, loadSession } from "@/lib/session"; 
 
 type FeedProfile = {
   uid?: string;
