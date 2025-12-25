@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import Link from "next/link";
-import { requireAuthOrRedirect } from "@/lib/session";
 
 type MatchProfile = {
   id: string;
@@ -16,7 +15,6 @@ type MatchProfile = {
 };
 
 export default function MatchProfilePage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params?.id;
 
@@ -25,10 +23,9 @@ export default function MatchProfilePage() {
   const [status, setStatus] = useState("");
 
   useEffect(() => {
-    requireAuthOrRedirect(router);
     (async () => {
       try {
-        const res = await apiGet(`/api/matches/${id}`);
+        const res: any = await apiGet(`/api/matches/${id}`);
         const prof = res?.profile || res;
         setP(prof || null);
       } catch (e: any) {
@@ -37,7 +34,7 @@ export default function MatchProfilePage() {
         setLoading(false);
       }
     })();
-  }, [router, id]);
+  }, [id]);
 
   return (
     <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
