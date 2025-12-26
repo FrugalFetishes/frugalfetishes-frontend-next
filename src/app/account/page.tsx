@@ -1,87 +1,203 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
 import AppHeader from '@/components/AppHeader';
 import { requireSession } from '@/lib/session';
 import { uidFromToken, loadUserProfileSnapshot, getProfileExtras } from '@/lib/socialStore';
 
-function cell(label: string, value: string) {
-  return { label, value };
+function maskPassword(pw?: string): string {
+  if (!pw) return '••••••••';
+  return '•'.repeat(Math.max(8, Math.min(24, pw.length)));
+}
+
+function safeString(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  return String(v);
 }
 
 export default function AccountDetailsPage() {
-  const token = useMemo(() => requireSession(), []);
-  const uid = useMemo(() => uidFromToken(token) || 'anon', [token]);
+  const token = useMemo(() => {
+    try {
+      return requireSession();
+    } catch {
+      return '';
+    }
+  }, []);
 
-  const profile = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
-  const extras = useMemo(() => getProfileExtras(uid), [uid]);
+  const uid = useMemo(() => {
+    try {
+      if (!token) return '';
+      return uidFromToken(token) || '';
+    } catch {
+      return '';
+    }
+  }, [token]);
 
-  const email = (profile?.email || (token.includes('@') ? token : '') || '').toString();
-  const fullName = (extras?.fullName || profile?.name || '').toString();
-  const displayName = (extras?.displayName || profile?.displayName || profile?.name || '').toString();
-  const subscriptionTier = (extras?.subscriptionTier || 'free').toString();
+  const profile = useMemo(() => {
+    try {
+      if (!uid) return null;
+      return loadUserProfileSnapshot(uid) as any;
+    } catch {
+      return null;
+    }
+  }, [uid]);
 
-  const rows = [
-    cell('Email', email || '(not set)'),
-    cell('Full name', fullName || '(not set)'),
-    cell('Display name', displayName || '(not set)'),
-    cell('Password', '•••••••• (placeholder)'),
-    cell('Subscription status', subscriptionTier),
-    cell('UID', uid),
-  ];
+  const extras = useMemo(() => {
+    try {
+      if (!uid) return null;
+      return getProfileExtras(uid) as any;
+    } catch {
+      return null;
+    }
+  }, [uid]);
+
+  const email = safeString(profile?.email || extras?.email);
+  const fullName = safeString(profile?.name || profile?.fullName || extras?.fullName);
+  const displayName = safeString(profile?.displayName || profile?.username || extras?.displayName || extras?.username);
+  const subscription = safeString(extras?.subscriptionStatus || extras?.subscription || 'FREE (placeholder)');
+  const passwordMasked = maskPassword(undefined); // placeholder: we are not storing passwords client-side
 
   return (
     <div className="ff-page">
-      <AppHeader active="account" />
+      <AppHeader active="profile" />
 
-      <main className="ff-shell" style={{ maxWidth: 980 }}>
-        <h1 className="ff-h1">Account details</h1>
+      <div className="ff-shell">
+        <h1 className="ff-title">Account Details</h1>
 
-        <div
-          style={{
-            maxWidth: 900,
-            borderRadius: 18,
-            border: '1px solid rgba(255,255,255,0.10)',
-            background: 'rgba(255,255,255,0.06)',
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ padding: '12px 14px', fontSize: 12, opacity: 0.75, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-            This page is local-dev friendly. Subscription and password are placeholders until Stripe/auth is wired.
+        {!uid ? (
+          <div className="ff-card">
+            <div className="ff-row">
+              <div className="ff-k">Status</div>
+              <div className="ff-v">Not logged in</div>
+            </div>
+            <div className="ff-muted">Go to <Link className="ff-link" href="/login">Login</Link>.</div>
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr' }}>
-            {rows.map((r) => (
-              <div key={r.label} style={{ display: 'contents' }}>
-                <div
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: 12,
-                    fontWeight: 800,
-                    opacity: 0.8,
-                    borderBottom: '1px solid rgba(255,255,255,0.08)',
-                    borderRight: '1px solid rgba(255,255,255,0.08)',
-                  }}
-                >
-                  {r.label}
-                </div>
-                <div
-                  style={{
-                    padding: '12px 14px',
-                    fontSize: 13,
-                    borderBottom: '1px solid rgba(255,255,255,0.08)',
-                    wordBreak: 'break-word',
-                    overflowWrap: 'anywhere',
-                    fontFamily: r.label === 'UID' ? 'monospace' : 'inherit',
-                  }}
-                >
-                  {r.value}
-                </div>
+        ) : (
+          <>
+            <div className="ff-card">
+              <div className="ff-row">
+                <div className="ff-k">Email</div>
+                <div className="ff-v">{email || '(not set)'}</div>
               </div>
-            ))}
-          </div>
-        </div>
-      </main>
+              <div className="ff-row">
+                <div className="ff-k">Full name</div>
+                <div className="ff-v">{fullName || '(not set)'}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Display name</div>
+                <div className="ff-v">{displayName || '(not set)'}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Password</div>
+                <div className="ff-v">{passwordMasked}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Subscription</div>
+                <div className="ff-v">{subscription}</div>
+              </div>
+            </div>
+
+            <div className="ff-card">
+              <div className="ff-row">
+                <div className="ff-k">User ID</div>
+                <div className="ff-v ff-mono">{uid}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Session token</div>
+                <div className="ff-v ff-mono">{token ? token.slice(0, 24) + '…' : '(none)'}</div>
+              </div>
+              <div className="ff-muted">
+                Account editing happens on the Profile page for now.
+              </div>
+            </div>
+
+            <div className="ff-actions">
+              <Link className="ff-btn" href="/profile">Edit Profile</Link>
+              <Link className="ff-btn" href="/matches">Back to Matches</Link>
+            </div>
+          </>
+        )}
+      </div>
+
+      <style jsx>{`
+        .ff-page {
+          min-height: 100vh;
+        }
+        .ff-shell {
+          max-width: 720px;
+          margin: 0 auto;
+          padding: 18px 14px 40px;
+        }
+        .ff-title {
+          margin: 10px 0 14px;
+          font-size: 22px;
+          color: rgba(255,255,255,0.92);
+        }
+        .ff-card {
+          border-radius: 16px;
+          padding: 14px 14px;
+          margin: 12px 0;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(0,0,0,0.18);
+          backdrop-filter: blur(8px);
+        }
+        .ff-row {
+          display: flex;
+          gap: 12px;
+          align-items: baseline;
+          padding: 6px 0;
+          border-bottom: 1px solid rgba(255,255,255,0.07);
+        }
+        .ff-row:last-child {
+          border-bottom: none;
+        }
+        .ff-k {
+          width: 140px;
+          opacity: 0.75;
+          font-size: 13px;
+          color: rgba(255,255,255,0.85);
+        }
+        .ff-v {
+          flex: 1;
+          font-size: 14px;
+          color: rgba(255,255,255,0.95);
+          word-break: break-word;
+        }
+        .ff-mono {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+          font-size: 12px;
+          opacity: 0.95;
+        }
+        .ff-actions {
+          display: flex;
+          gap: 10px;
+          margin-top: 14px;
+          flex-wrap: wrap;
+        }
+        .ff-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 10px 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.18);
+          background: rgba(0,0,0,0.15);
+          color: rgba(255,255,255,0.9);
+          text-decoration: none;
+        }
+        .ff-link {
+          color: rgba(255,255,255,0.95);
+          text-decoration: underline;
+        }
+        .ff-muted {
+          opacity: 0.8;
+          font-size: 13px;
+          margin-top: 6px;
+          color: rgba(255,255,255,0.85);
+        }
+      `}</style>
     </div>
   );
 }
