@@ -106,32 +106,19 @@ function uniqPush(arr: string[], v: string) {
 export function uidFromSessionToken(token: string | null): string | null {
   if (!token) return null;
 
-  // Stable UID: keep a persisted uid across token refreshes so local matches stick.
-  // If token decodes to a stable subject/uid, we refresh the stored uid to support account switching.
-  const stored = getStoredUid();
-
-  // Attempt to decode a JWT-style token to a stable subject.
-  let decodedUid: string | null = null;
+  // Prefer a stable subject/uid from a JWT-style token when available.
   try {
     const parts = token.split(".");
     if (parts.length >= 2) {
       const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      decodedUid = payload.sub || payload.uid || payload.userId || payload.user_id || null;
+      const decodedUid = payload.sub || payload.uid || payload.userId || payload.user_id || null;
+      if (decodedUid) return String(decodedUid);
     }
   } catch {}
 
-  if (decodedUid) {
-    if (!stored || stored !== decodedUid) setStoredUid(decodedUid);
-    return decodedUid;
-  }
-
-  // Non-JWT token: fallback to token-derived uid, but persist it so it remains stable.
-  const fallback = "tok_" + token.slice(0, 12);
-  if (!stored) {
-    setStoredUid(fallback);
-    return fallback;
-  }
-  return stored;
+  // Non-JWT token: derive uid directly from the token so different logins get different uids.
+  // This remains stable across refresh because the session token itself is persisted by session.ts.
+  return "tok_" + token.slice(0, 24);
 }
 
 export function getBadges(uid: string) {
@@ -215,7 +202,7 @@ export function like(targetUid: string, myUid: string): { matched: boolean; matc
 
   const otherLikedMe = (s.likesGiven[targetUid] || []).includes(myUid);
   if (otherLikedMe) {
-    const matchId = [myUid, targetUid].sort().join("__");
+    const matchId = "match_" + [myUid, targetUid].sort().join("_");
     const exists = s.matches.some((m) => m.id === matchId);
     if (!exists) {
       const [a, b] = [myUid, targetUid].sort();
