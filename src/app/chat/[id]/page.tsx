@@ -67,13 +67,15 @@ export default function ChatPage() {
       const msgs = getChat(matchId);
       const out: Row[] = [];
       let lastDay = "";
-      for (const m of msgs) {
-        const day = fmtDate(m.createdAt);
+      for (const m of msgs as any[]) {
+        const day = fmtDate(Number(m.createdAt) || 0);
         if (day && day !== lastDay) {
           lastDay = day;
           out.push({ kind: "date", id: `d:${day}`, label: day });
         }
-        out.push({ kind: "msg", id: m.id, from: m.from, text: m.text, ts: m.createdAt });
+        // socialStore message shape may be {fromUserId,text,createdAt} or legacy {from,text,createdAt}
+        const from = String(m.from ?? m.fromUserId ?? "");
+        out.push({ kind: "msg", id: String(m.id), from, text: String(m.text || ""), ts: Number(m.createdAt) || 0 });
       }
       setRows(out);
     };
