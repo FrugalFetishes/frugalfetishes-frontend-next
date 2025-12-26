@@ -221,3 +221,15 @@ export function incrementUnread(uid: string, matchId: string, amount: number = 1
 export function markChatRead(uid: string, matchId: string) {
   clearUnreadForMatch(uid, matchId);
 }
+
+
+// Extra compat: some files import clearUnreadForChat()
+export function clearUnreadForChat(uid: string, matchId: string) {
+  return clearUnreadForMatch(uid, matchId);
+}
+
+// Extra compat: placeholder snapshot loader (wired later to real profiles)
+export function loadUserProfileSnapshot(_uid: string) {
+  // For now, return null. UI should handle missing snapshot.
+  return null;
+}
