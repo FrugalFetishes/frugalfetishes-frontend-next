@@ -11,124 +11,175 @@ function maskPassword(pw?: string): string {
   return '•'.repeat(Math.max(8, Math.min(24, pw.length)));
 }
 
+function safeString(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  return String(v);
+}
+
 export default function AccountDetailsPage() {
   const token = useMemo(() => {
     try {
       return requireSession();
     } catch {
-      return null as any;
+      return '';
     }
   }, []);
 
-  const uid = useMemo(() => uidFromToken(token), [token]);
+  const uid = useMemo(() => {
+    try {
+      if (!token) return '';
+      return uidFromToken(token) || '';
+    } catch {
+      return '';
+    }
+  }, [token]);
 
   const profile = useMemo(() => {
     try {
+      if (!uid) return null;
       return loadUserProfileSnapshot(uid) as any;
     } catch {
-      return null as any;
+      return null;
     }
   }, [uid]);
 
   const extras = useMemo(() => {
     try {
+      if (!uid) return null;
       return getProfileExtras(uid) as any;
     } catch {
-      return {};
+      return null;
     }
   }, [uid]);
 
-  const email = String(profile?.email ?? extras?.email ?? '');
-  const fullName = String(extras?.fullName ?? profile?.fullName ?? '');
-  const displayName = String(profile?.displayName ?? extras?.displayName ?? '');
-  const tier = String(extras?.subscriptionTier ?? 'free');
+  const email = safeString(profile?.email || extras?.email);
+  const fullName = safeString(profile?.name || profile?.fullName || extras?.fullName);
+  const displayName = safeString(profile?.displayName || profile?.username || extras?.displayName || extras?.username);
+  const subscription = safeString(extras?.subscriptionStatus || extras?.subscription || 'FREE (placeholder)');
+  const passwordMasked = maskPassword(undefined); // placeholder: we are not storing passwords client-side
 
   return (
     <div className="ff-page">
-      <AppHeader active="account" />
+      <AppHeader active="profile" />
+
       <div className="ff-shell">
-        <h1 className="ff-h1">Account Details</h1>
+        <h1 className="ff-title">Account Details</h1>
 
-        <div className="ff-card">
-          <div className="ff-kv">
-            <div className="k">Email</div>
-            <div className="v">{email || '—'}</div>
+        {!uid ? (
+          <div className="ff-card">
+            <div className="ff-row">
+              <div className="ff-k">Status</div>
+              <div className="ff-v">Not logged in</div>
+            </div>
+            <div className="ff-muted">Go to <Link className="ff-link" href="/login">Login</Link>.</div>
           </div>
+        ) : (
+          <>
+            <div className="ff-card">
+              <div className="ff-row">
+                <div className="ff-k">Email</div>
+                <div className="ff-v">{email || '(not set)'}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Full name</div>
+                <div className="ff-v">{fullName || '(not set)'}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Display name</div>
+                <div className="ff-v">{displayName || '(not set)'}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Password</div>
+                <div className="ff-v">{passwordMasked}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Subscription</div>
+                <div className="ff-v">{subscription}</div>
+              </div>
+            </div>
 
-          <div className="ff-kv">
-            <div className="k">Full name</div>
-            <div className="v">{fullName || '—'}</div>
-          </div>
+            <div className="ff-card">
+              <div className="ff-row">
+                <div className="ff-k">User ID</div>
+                <div className="ff-v ff-mono">{uid}</div>
+              </div>
+              <div className="ff-row">
+                <div className="ff-k">Session token</div>
+                <div className="ff-v ff-mono">{token ? token.slice(0, 24) + '…' : '(none)'}</div>
+              </div>
+              <div className="ff-muted">
+                Account editing happens on the Profile page for now.
+              </div>
+            </div>
 
-          <div className="ff-kv">
-            <div className="k">Display name</div>
-            <div className="v">{displayName || '—'}</div>
-          </div>
-
-          <div className="ff-kv">
-            <div className="k">Password</div>
-            <div className="v">{maskPassword()}</div>
-          </div>
-
-          <div className="ff-kv">
-            <div className="k">Subscription status</div>
-            <div className="v">{tier.toUpperCase()}</div>
-          </div>
-
-          <div className="ff-actions">
-            <Link className="ff-btn" href="/profile">Edit Profile</Link>
-            <Link className="ff-btn" href="/subscribe">Manage Subscription</Link>
-          </div>
-
-          <p className="ff-muted">
-            Password editing is a placeholder for now (OTP auth).
-          </p>
-        </div>
+            <div className="ff-actions">
+              <Link className="ff-btn" href="/profile">Edit Profile</Link>
+              <Link className="ff-btn" href="/matches">Back to Matches</Link>
+            </div>
+          </>
+        )}
       </div>
 
       <style jsx>{`
-        .ff-shell {
-          max-width: 860px;
-          margin: 0 auto;
-          padding: 18px;
+        .ff-page {
+          min-height: 100vh;
         }
-        .ff-h1 {
-          font-size: 28px;
-          margin: 10px 0 16px;
+        .ff-shell {
+          max-width: 720px;
+          margin: 0 auto;
+          padding: 18px 14px 40px;
+        }
+        .ff-title {
+          margin: 10px 0 14px;
+          font-size: 22px;
+          color: rgba(255,255,255,0.92);
         }
         .ff-card {
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(0,0,0,0.12);
           border-radius: 16px;
-          padding: 14px;
-          display: grid;
-          gap: 10px;
+          padding: 14px 14px;
+          margin: 12px 0;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(0,0,0,0.18);
+          backdrop-filter: blur(8px);
         }
-        .ff-kv {
-          display: grid;
-          grid-template-columns: 160px 1fr;
+        .ff-row {
+          display: flex;
           gap: 12px;
-          padding: 10px 0;
-          border-bottom: 1px solid rgba(255,255,255,0.08);
+          align-items: baseline;
+          padding: 6px 0;
+          border-bottom: 1px solid rgba(255,255,255,0.07);
         }
-        .ff-kv:last-child {
-          border-bottom: 0;
+        .ff-row:last-child {
+          border-bottom: none;
         }
-        .k {
+        .ff-k {
+          width: 140px;
           opacity: 0.75;
           font-size: 13px;
+          color: rgba(255,255,255,0.85);
         }
-        .v {
-          font-weight: 600;
-          overflow-wrap: anywhere;
+        .ff-v {
+          flex: 1;
+          font-size: 14px;
+          color: rgba(255,255,255,0.95);
+          word-break: break-word;
+        }
+        .ff-mono {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+          font-size: 12px;
+          opacity: 0.95;
         }
         .ff-actions {
           display: flex;
           gap: 10px;
-          margin-top: 6px;
+          margin-top: 14px;
           flex-wrap: wrap;
         }
         .ff-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           padding: 10px 12px;
           border-radius: 999px;
           border: 1px solid rgba(255,255,255,0.18);
@@ -136,10 +187,15 @@ export default function AccountDetailsPage() {
           color: rgba(255,255,255,0.9);
           text-decoration: none;
         }
+        .ff-link {
+          color: rgba(255,255,255,0.95);
+          text-decoration: underline;
+        }
         .ff-muted {
           opacity: 0.8;
           font-size: 13px;
           margin-top: 6px;
+          color: rgba(255,255,255,0.85);
         }
       `}</style>
     </div>
