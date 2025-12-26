@@ -1,222 +1,213 @@
-// src/lib/socialStore.ts
-// Local-first social persistence (likes, matches, messages, notifications)
-// SSR-safe: never touches localStorage unless in browser.
-// This file also provides COMPAT exports (badgeCounts, uidFromToken, getChat, addChatMessage, incrementUnread)
-// to match existing imports across the app.
-
-export type Match = {
-  id: string;              // matchId
-  a: string;               // uid A
-  b: string;               // uid B
-  createdAt: number;       // ms epoch
-  lastMessageAt?: number;  // ms epoch
-  lastMessageText?: string;
-};
-
-export type Message = {
-  id: string;
-  matchId: string;
-  from: string;           // uid
-  text: string;
-  createdAt: number;      // ms epoch
-};
-
+/* src/lib/socialStore.ts
+   Local-only social layer for dev/testing.
+   - Matches / Messages stored in localStorage
+   - Profiles are sourced from:
+     1) ff_profiles_by_uid_v1 (explicitly saved via /profile)
+     2) ff_deck_profiles_v2 (Discover deck) as a fallback
+*/
 
 export type UserProfileSnapshot = {
-  uid: string;
+  id: string;
   name?: string;
+  displayName?: string;
+  username?: string;
+  email?: string;
+  photoUrl?: string;
+  photoURL?: string;
+  avatarUrl?: string;
+  primaryPhotoUrl?: string;
+  photos?: any[];
+  gallery?: any[];
   age?: number;
   city?: string;
-
-  photoUrl?: string;
-  profilePhotoUrl?: string;
-  imageUrl?: string;
-  avatarUrl?: string;
-
-  // allow future expansion without fighting types
-  [key: string]: unknown;
+  about?: string;
 };
 
-type SeenState = {
-  likesGiven: Record<string, string[]>;  // uid -> [targetUid]
-  likesReceived: Record<string, string[]>; // uid -> [fromUid]
+export type Match = {
+  id: string;
+  a: string;
+  b: string;
+  createdAt?: number; // ms since epoch
+};
+
+type ChatMessage = {
+  id: string;
+  matchId: string;
+  from: string;
+  text: string;
+  createdAt: number; // ms since epoch
+  readBy?: string[];
+};
+
+type SocialState = {
+  likesGiven: Record<string, string[]>;
+  likesReceived: Record<string, string[]>;
   matches: Match[];
-  messages: Message[];
-  unreadByUser: Record<string, Record<string, number>>; // uid -> matchId -> count
-  newMatchesByUser: Record<string, number>; // uid -> count
-  profileExtrasByUser: Record<string, { headline?: string; about?: string; zip?: string }>;
+  chats: Record<string, ChatMessage[]>;
+  lastReadByMatchAndUser: Record<string, Record<string, number>>; // matchId -> uid -> ms
+  profileExtrasByUser: Record<string, Record<string, any>>;
 };
 
-const KEY = "ff_social_v1";
+const STORE_KEY = "ff_social_v1";
+const USER_ID_KEY = "ff_user_id_v1";
 
-const UID_KEY = "ff_user_id_v1";
-function getStoredUid(): string | null {
-  if (!isBrowser()) return null;
+// Profile stores
+const PROFILES_BY_UID_KEY = "ff_profiles_by_uid_v1";
+const DECK_KEY = "ff_deck_profiles_v2"; // Discover page seed deck (array)
+
+function safeParse<T>(raw: string | null, fallback: T): T {
   try {
-    return localStorage.getItem(UID_KEY);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
   } catch {
-    return null;
+    return fallback;
   }
 }
 
-function setStoredUid(uid: string) {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(UID_KEY, uid);
-  } catch {}
-}
-
-
-function isBrowser() {
-  return typeof window !== "undefined" && typeof localStorage !== "undefined";
-}
-
-function load(): SeenState {
-  const empty: SeenState = {
+function load(): SocialState {
+  const s = safeParse<SocialState>(typeof window !== "undefined" ? localStorage.getItem(STORE_KEY) : null, {
     likesGiven: {},
     likesReceived: {},
     matches: [],
-    messages: [],
-    unreadByUser: {},
-    newMatchesByUser: {},
+    chats: {},
+    lastReadByMatchAndUser: {},
     profileExtrasByUser: {},
-  };
-  if (!isBrowser()) return empty;
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return empty;
-    const parsed = JSON.parse(raw);
-    return { ...empty, ...parsed };
-  } catch {
-    return empty;
-  }
+  });
+  return s;
 }
 
-function save(state: SeenState) {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(KEY, JSON.stringify(state));
-  } catch {}
+function save(s: SocialState) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(STORE_KEY, JSON.stringify(s));
 }
 
 function uniqPush(arr: string[], v: string) {
   if (!arr.includes(v)) arr.push(v);
 }
 
-export function uidFromSessionToken(token: string | null): string | null {
-  if (!token) return null;
+function nowMs() {
+  return Date.now();
+}
 
-  // Stable UID: keep a persisted uid across token refreshes so local matches stick.
-  // If token decodes to a stable subject/uid, we refresh the stored uid to support account switching.
-  const stored = getStoredUid();
+export function getOrCreateUserId(): string {
+  if (typeof window === "undefined") return "anon";
+  const existing = localStorage.getItem(USER_ID_KEY);
+  if (existing) return existing;
+  const id = "u_" + Math.random().toString(36).slice(2) + "_" + Date.now().toString(36);
+  localStorage.setItem(USER_ID_KEY, id);
+  return id;
+}
 
-  // Attempt to decode a JWT-style token to a stable subject.
-  let decodedUid: string | null = null;
+export function setUserId(uid: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(USER_ID_KEY, uid);
+}
+
+export function uidFromToken(token: string): string {
+  // In this project the "token" often looks like:
+  // - "uid:<uid>"
+  // - "<uid>"
+  // - "email:<email>" (legacy)
+  if (!token) return "anon";
+  if (token.startsWith("uid:")) return token.slice(4);
+  if (token.startsWith("email:")) return token.slice(6);
+  return token;
+}
+
+/* ---------------- Profiles ---------------- */
+
+function loadProfilesByUid(): Record<string, UserProfileSnapshot> {
+  if (typeof window === "undefined") return {};
+  return safeParse<Record<string, UserProfileSnapshot>>(localStorage.getItem(PROFILES_BY_UID_KEY), {});
+}
+
+function saveProfilesByUid(map: Record<string, UserProfileSnapshot>) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(PROFILES_BY_UID_KEY, JSON.stringify(map));
+}
+
+function loadDeckProfiles(): any[] {
+  if (typeof window === "undefined") return [];
+  return safeParse<any[]>(localStorage.getItem(DECK_KEY), []);
+}
+
+function normalizeProfileFromAny(p: any, fallbackId: string): UserProfileSnapshot {
+  const out: UserProfileSnapshot = {
+    id: String(p?.id ?? p?.uid ?? p?.userId ?? fallbackId),
+    name: p?.name ?? p?.displayName ?? p?.username ?? p?.fullName,
+    displayName: p?.displayName,
+    username: p?.username,
+    email: p?.email,
+    photoUrl: p?.photoUrl ?? p?.photoURL ?? p?.avatarUrl ?? p?.primaryPhotoUrl,
+    photoURL: p?.photoURL,
+    avatarUrl: p?.avatarUrl,
+    primaryPhotoUrl: p?.primaryPhotoUrl,
+    photos: p?.photos,
+    gallery: p?.gallery,
+    age: typeof p?.age === "number" ? p.age : undefined,
+    city: typeof p?.city === "string" ? p.city : undefined,
+    about: typeof p?.about === "string" ? p.about : undefined,
+  };
+  return out;
+}
+
+export function upsertUserProfileSnapshot(uid: string, patch: Partial<UserProfileSnapshot>) {
+  const map = loadProfilesByUid();
+  const current = map[uid] || { id: uid };
+  const next: UserProfileSnapshot = { ...current, ...patch, id: uid };
+  map[uid] = next;
+  saveProfilesByUid(map);
+
+  // Also try to update the Discover deck if it exists.
   try {
-    const parts = token.split(".");
-    if (parts.length >= 2) {
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      decodedUid = payload.sub || payload.uid || payload.userId || payload.user_id || null;
+    const deck = loadDeckProfiles();
+    const idx = deck.findIndex((x: any) => String(x?.id ?? x?.uid ?? "") === uid);
+    if (idx >= 0) {
+      deck[idx] = { ...deck[idx], ...next, id: uid };
+      localStorage.setItem(DECK_KEY, JSON.stringify(deck));
     }
   } catch {}
-
-  if (decodedUid) {
-    if (!stored || stored !== decodedUid) setStoredUid(decodedUid);
-    return decodedUid;
-  }
-
-  // Non-JWT token: fallback to token-derived uid, but persist it so it remains stable.
-  const fallback = "tok_" + token.slice(0, 12);
-  if (!stored) {
-    setStoredUid(fallback);
-    return fallback;
-  }
-  return stored;
 }
 
-export function getBadges(uid: string) {
-  const s = load();
-  const matchCount = s.newMatchesByUser[uid] || 0;
-  const unread = s.unreadByUser[uid] || {};
-  const msgCount = Object.values(unread).reduce((a, b) => a + (b || 0), 0);
-  return { total: matchCount + msgCount, matches: matchCount, messages: msgCount };
+export function loadUserProfileSnapshot(uid: string): UserProfileSnapshot | null {
+  if (!uid) return null;
+
+  // 1) Explicit by-uid store (edited via /profile)
+  const byUid = loadProfilesByUid();
+  const direct = byUid[uid];
+  if (direct) return normalizeProfileFromAny(direct, uid);
+
+  // 2) Discover deck (seeded profiles)
+  try {
+    const deck = loadDeckProfiles();
+    const found = deck.find((p: any) => String(p?.id ?? p?.uid ?? "") === uid);
+    if (found) return normalizeProfileFromAny(found, uid);
+  } catch {}
+
+  // 3) As a last resort, return minimal snapshot (so UI can still render)
+  return { id: uid };
 }
 
-export function clearNewMatches(uid: string) {
-  const s = load();
-  s.newMatchesByUser[uid] = 0;
-  save(s);
-}
-
-export function clearUnreadForMatch(uid: string, matchId: string) {
-  const s = load();
-  if (!s.unreadByUser[uid]) s.unreadByUser[uid] = {};
-  s.unreadByUser[uid][matchId] = 0;
-  save(s);
-}
-
-export function getMatchesFor(uid: string): Match[] {
-  const s = load();
-  return s.matches
-    .filter((m) => m.a === uid || m.b === uid)
-    .sort((x, y) => (y.lastMessageAt || y.createdAt) - (x.lastMessageAt || x.createdAt));
-}
-
-export function getMessages(matchId: string): Message[] {
-  const s = load();
-  return s.messages
-    .filter((m) => m.matchId === matchId)
-    .sort((a, b) => a.createdAt - b.createdAt);
-}
-
-export function sendMessage(matchId: string, fromUid: string, toUid: string, text: string) {
-  const s = load();
-
-  const msg: Message = {
-    id: "m_" + Math.random().toString(36).slice(2),
-    matchId,
-    from: fromUid,
-    text,
-    createdAt: Date.now(),
-  };
-  s.messages.push(msg);
-
-  const m = s.matches.find((mm) => mm.id === matchId);
-  if (m) {
-    m.lastMessageAt = msg.createdAt;
-    m.lastMessageText = text.slice(0, 80);
-  }
-
-  if (!s.unreadByUser[toUid]) s.unreadByUser[toUid] = {};
-  s.unreadByUser[toUid][matchId] = (s.unreadByUser[toUid][matchId] || 0) + 1;
-
-  save(s);
-  return msg;
-}
-
-export type ProfileExtras = {
-  headline?: string;
-  about?: string;
-  zip?: string;
-  // account / subscription
-  fullName?: string;
-  displayName?: string;
-  subscriptionTier?: "free" | "verified" | "gold" | "platinum";
-  subscriptionUpdatedAt?: number;
-};
-
-export function getProfileExtras(uid: string): ProfileExtras {
+export function getProfileExtras(uid: string) {
   const s = load();
   return s.profileExtrasByUser[uid] || {};
 }
 
-export function setProfileExtras(uid: string, extras: ProfileExtras) {
+export function setProfileExtras(uid: string, extras: { headline?: string; about?: string; zip?: string; subscriptionTier?: string; fullName?: string; displayName?: string }) {
   const s = load();
   s.profileExtrasByUser[uid] = { ...(s.profileExtrasByUser[uid] || {}), ...extras };
   save(s);
+
+  // Also mirror to profile snapshot for convenience.
+  upsertUserProfileSnapshot(uid, {
+    name: extras.fullName ?? undefined,
+    displayName: extras.displayName ?? undefined,
+    about: extras.about ?? undefined,
+  });
 }
 
-// Like logic: if B already liked A, create match
+/* ---------------- Like / Match ---------------- */
+
 export function like(targetUid: string, myUid: string): { matched: boolean; matchId?: string } {
   const s = load();
   if (!s.likesGiven[myUid]) s.likesGiven[myUid] = [];
@@ -229,10 +220,7 @@ export function like(targetUid: string, myUid: string): { matched: boolean; matc
     const matchId = "match_" + [myUid, targetUid].sort().join("_");
     const exists = s.matches.some((m) => m.id === matchId);
     if (!exists) {
-      const [a, b] = [myUid, targetUid].sort();
-      s.matches.push({ id: matchId, a, b, createdAt: Date.now() });
-      s.newMatchesByUser[myUid] = (s.newMatchesByUser[myUid] || 0) + 1;
-      s.newMatchesByUser[targetUid] = (s.newMatchesByUser[targetUid] || 0) + 1;
+      s.matches.unshift({ id: matchId, a: myUid, b: targetUid, createdAt: nowMs() });
     }
     save(s);
     return { matched: true, matchId };
@@ -242,94 +230,83 @@ export function like(targetUid: string, myUid: string): { matched: boolean; matc
   return { matched: false };
 }
 
-export function pass(_targetUid: string, _myUid: string) {
-  // no-op for now
-}
-
-export function resetAllSocial() {
-  if (!isBrowser()) return;
-  localStorage.removeItem(KEY);
-}
-
-/* =========================
-   COMPAT EXPORTS (for existing imports)
-   ========================= */
-
-// AppHeader.tsx expects badgeCounts()
-export function badgeCounts(uid: string) {
-  return getBadges(uid);
-}
-
-// chat/[id]/page.tsx expects uidFromToken()
-export function uidFromToken(token: string | null) {
-  return uidFromSessionToken(token);
-}
-
-// chat expects getChat() + addChatMessage() + incrementUnread()
-export function getChat(matchId: string) {
-  return getMessages(matchId);
-}
-
-export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string): Message | null;
-export function addChatMessage(
-  matchId: string,
-  payload: { fromUserId: string; text: string; toUserId?: string }
-): Message | null;
-export function addChatMessage(matchId: string, a: any, b?: any, c?: any): Message | null {
-  // Supports both:
-  // 1) addChatMessage(matchId, fromUid, toUid, text)
-  // 2) addChatMessage(matchId, { fromUserId, text, toUserId? })
-  if (typeof a === "string") {
-    const fromUid = a;
-    const toUid = String(b || "");
-    const text = String(c || "");
-    if (!fromUid || !toUid || !text) return null;
-    return sendMessage(matchId, fromUid, toUid, text);
-  }
-
-  const payload = a as { fromUserId?: string; text?: string; toUserId?: string };
-  const fromUid = payload?.fromUserId || "";
-  const text = payload?.text || "";
-  if (!fromUid || !text) return null;
-
-  // Infer recipient from match record if not provided
+export function getMatchesFor(uid: string): Match[] {
   const s = load();
-  const m = s.matches.find((mm) => mm.id === matchId);
-  const inferredToUid =
-    payload?.toUserId ||
-    (m ? (m.a === fromUid ? m.b : m.b === fromUid ? m.a : "") : "");
-
-  if (!inferredToUid) return null;
-
-  // Note: sendMessage() does its own load/save, so we don't mutate the loaded state here.
-  return sendMessage(matchId, fromUid, inferredToUid, text);
+  return (s.matches || []).filter((m) => m.a === uid || m.b === uid);
 }
 
-
-export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
+export function markMatchClicked(matchId: string, uid: string) {
+  // "New match" dot is simply based on whether user has visited that match list item
+  // We store lastReadByMatchAndUser[matchId][uid] = now
   const s = load();
-  if (!s.unreadByUser[uid]) s.unreadByUser[uid] = {};
-  s.unreadByUser[uid][matchId] = (s.unreadByUser[uid][matchId] || 0) + amount;
+  if (!s.lastReadByMatchAndUser[matchId]) s.lastReadByMatchAndUser[matchId] = {};
+  s.lastReadByMatchAndUser[matchId][uid] = nowMs();
   save(s);
 }
 
-export function markChatRead(uid: string, matchId: string) {
-  clearUnreadForMatch(uid, matchId);
+/* ---------------- Chat ---------------- */
+
+export function getChat(matchId: string): ChatMessage[] {
+  const s = load();
+  return s.chats[matchId] || [];
 }
 
-
-// Extra compat: some files import clearUnreadForChat()
-export function clearUnreadForChat(uid: string, matchId: string) {
-  return clearUnreadForMatch(uid, matchId);
+export function sendMessage(matchId: string, fromUid: string, text: string) {
+  const s = load();
+  if (!s.chats[matchId]) s.chats[matchId] = [];
+  const msg: ChatMessage = {
+    id: "msg_" + Math.random().toString(36).slice(2) + "_" + Date.now().toString(36),
+    matchId,
+    from: fromUid,
+    text,
+    createdAt: nowMs(),
+    readBy: [fromUid],
+  };
+  s.chats[matchId].push(msg);
+  save(s);
 }
 
-// Extra compat: placeholder snapshot loader (wired later to real profiles)
-export function loadUserProfileSnapshot(uid: string): UserProfileSnapshot | null {
-  // Local-first: we don't have a full remote profile DB yet.
-  // Return a minimal snapshot based on locally-edited extras when available.
-  if (!uid) return null;
-  const snap: UserProfileSnapshot = { uid };
-  // extras are stored separately; UI reads them via getProfileExtras already.
-  // Keeping this function typed prevents Next build from inferring `never`.
-  return snap;
+export function markChatRead(matchId: string, uid: string) {
+  const s = load();
+  const msgs = s.chats[matchId] || [];
+  msgs.forEach((m) => {
+    if (!m.readBy) m.readBy = [];
+    if (!m.readBy.includes(uid)) m.readBy.push(uid);
+  });
+  if (!s.lastReadByMatchAndUser[matchId]) s.lastReadByMatchAndUser[matchId] = {};
+  s.lastReadByMatchAndUser[matchId][uid] = nowMs();
+  save(s);
+}
+
+export function unreadCountForMatch(matchId: string, uid: string): number {
+  const msgs = getChat(matchId);
+  let c = 0;
+  for (const m of msgs) {
+    if (m.from !== uid && !(m.readBy || []).includes(uid)) c++;
+  }
+  return c;
+}
+
+/* ---------------- Badges ---------------- */
+
+export function badgeCounts(uid: string): { total: number; matches: number; messages: number } {
+  const matches = getMatchesFor(uid);
+
+  let newMatches = 0;
+  for (const m of matches) {
+    const last = load().lastReadByMatchAndUser?.[m.id]?.[uid] ?? 0;
+    const createdAt = m.createdAt ?? 0;
+    if (createdAt > last) newMatches++;
+  }
+
+  let unreadMessages = 0;
+  for (const m of matches) {
+    unreadMessages += unreadCountForMatch(m.id, uid);
+  }
+
+  return {
+    total: newMatches + unreadMessages,
+    matches: newMatches,
+    messages: unreadMessages,
+  };
 }
