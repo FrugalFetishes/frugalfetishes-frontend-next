@@ -68,12 +68,12 @@ export default function ChatPage() {
       const out: Row[] = [];
       let lastDay = "";
       for (const m of msgs) {
-        const day = fmtDate(m.ts);
+        const day = fmtDate(m.createdAt);
         if (day && day !== lastDay) {
           lastDay = day;
           out.push({ kind: "date", id: `d:${day}`, label: day });
         }
-        out.push({ kind: "msg", id: m.id, from: m.fromUserId, text: m.text, ts: m.ts });
+        out.push({ kind: "msg", id: m.id, from: m.fromUserId, text: m.text, ts: m.createdAt });
       }
       setRows(out);
     };
