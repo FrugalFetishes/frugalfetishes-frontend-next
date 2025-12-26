@@ -121,14 +121,38 @@ export default function DiscoverPage() {
     // Normalize + filter obviously bad entries (this prevents “random” placeholder cards)
     const list: Profile[] = raw
       .map((u: any) => ({
-        id: toText(u?.id || u?._id || u?.uid || ''),
-        name: toText(u?.name || u?.displayName || u?.username || ''),
-        age: typeof u?.age === 'number' ? u.age : Number.isFinite(Number(u?.age)) ? Number(u.age) : undefined,
-        city: toText(u?.city || u?.location?.city || ''),
-        bio: toText(u?.bio || u?.about || ''),
-        interests: Array.isArray(u?.interests) ? u.interests.map(toText).filter(Boolean) : [],
-        photoUrl: u?.photoUrl ?? u?.photo ?? u?.avatarUrl ?? null,
-        photos: Array.isArray(u?.photos) ? u.photos : null
+        id: toText(u?.id || u?._id || u?.uid || u?.userId || ""),
+        name: toText(u?.name || u?.displayName || u?.username || "Unknown"),
+        age: typeof u?.age === "number" ? u.age : Number(u?.age) || undefined,
+        city: toText(u?.city || u?.location?.city || u?.profileCity || ""),
+        bio: toText(u?.bio || u?.about || u?.profileBio || ""),
+        // Prefer explicit profile photo fields first, then fall back.
+        photoUrl: toText(
+          u?.profilePhotoUrl ||
+            u?.primaryPhotoUrl ||
+            u?.mainPhotoUrl ||
+            u?.imageUrl ||
+            u?.photoUrl ||
+            u?.photoURL ||
+            u?.photo ||
+            u?.avatarUrl ||
+            u?.avatar
+        ),
+        // Collect any array-style photo fields.
+        photos: Array.isArray(u?.photos)
+          ? u.photos
+          : Array.isArray(u?.images)
+            ? u.images
+            : Array.isArray(u?.pictures)
+              ? u.pictures
+              : Array.isArray(u?.gallery)
+                ? u.gallery
+                : [],
+        interests: Array.isArray(u?.interests)
+          ? u.interests
+          : Array.isArray(u?.kinks)
+            ? u.kinks
+            : [],
       }))
       .filter((u) => !!u.id);
 
