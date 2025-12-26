@@ -1,50 +1,61 @@
+// src/app/matches/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
-import { requireSession } from "@/lib/session";
-import { uidFromToken, consumeNewMatches, listMatchesFor, loadUserProfileSnapshot } from "@/lib/socialStore";
+import { readSession } from "@/lib/session";
+import { uidFromSessionToken, getBadges, clearNewMatches, getMatchesFor, type Match } from "@/lib/socialStore";
 
 export default function MatchesPage() {
-  const token = useMemo(() => {
-    try { return requireSession(); } catch { return null as any; }
-  }, []);
-  const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
+  const router = useRouter();
 
-  const [matches, setMatches] = useState(() => listMatchesFor(uid));
+  const [uid, setUid] = useState<string | null>(null);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [badges, setBadges] = useState({ total: 0, matches: 0, messages: 0 });
 
+  // Load client-only data
   useEffect(() => {
-    // opening Matches should clear "new match" badge
-    try { consumeNewMatches(uid); } catch {}
-    const id = window.setInterval(() => setMatches(listMatchesFor(uid)), 700);
-    return () => window.clearInterval(id);
-  }, [uid]);
+    const tok = readSession();
+    const u = uidFromSessionToken(tok);
+    if (!u) {
+      router.replace("/login");
+      return;
+    }
+    setUid(u);
+    setBadges(getBadges(u));
+    setMatches(getMatchesFor(u));
+    // Clear "new match" badge when user opens matches page
+    clearNewMatches(u);
+    setBadges(getBadges(u));
+  }, [router]);
+
+  const empty = useMemo(() => !matches || matches.length === 0, [matches]);
 
   return (
-    <div className="ff-page">
-      <AppHeader active="matches" />
+    <div className="appShell">
+      <AppHeader active="matches" badges={badges} />
+      <main className="appMain">
+        <h1 className="pageTitle">Matches</h1>
 
-      <main className="ff-shell">
-        <h1 className="ff-title">Matches</h1>
-
-        {matches.length === 0 ? (
-          <div className="ff-card">
-            <div className="ff-muted">No matches yet. Like someone in Discover to create one.</div>
+        {empty ? (
+          <div className="panel">
+            <div className="panelTitle">No matches yet</div>
+            <div className="panelText">Like someone in Discover to create one.</div>
+            <div style={{ marginTop: 12 }}>
+              <Link className="pillBtn" href="/discover">Go to Discover</Link>
+            </div>
           </div>
         ) : (
-          <div className="ff-grid">
+          <div className="grid">
             {matches.map((m) => {
-              const p = loadUserProfileSnapshot(m.otherUserId);
-              const photo = p?.photoUrl || p?.profilePhotoUrl || p?.imageUrl || p?.avatarUrl || "/frugalfetishes.png";
-              const name = p?.name || m.otherUserId;
-              const age = typeof p?.age === "number" ? p.age : "";
+              const other = uid ? (m.a === uid ? m.b : m.a) : "";
               return (
-                <Link key={m.matchId} className="ff-match" href={`/matches/${m.matchId}`}>
-                  <img className="ff-match-img" src={photo} alt={name} />
-                  <div className="ff-match-meta">
-                    <div className="ff-match-name">{name}{age ? `, ${age}` : ""}</div>
-                    <div className="ff-muted">Tap to view / message</div>
+                <Link key={m.id} href={`/matches/${encodeURIComponent(other)}`} className="matchCard">
+                  <div className="matchCardTitle">{other}</div>
+                  <div className="matchCardMeta">
+                    {m.lastMessageText ? m.lastMessageText : "Tap to view profile"}
                   </div>
                 </Link>
               );
