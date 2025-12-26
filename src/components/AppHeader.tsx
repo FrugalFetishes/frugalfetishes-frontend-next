@@ -1,351 +1,352 @@
 'use client';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import { clearSession, requireSession } from '@/lib/session';
+import { badgeCounts, uidFromToken } from '@/lib/socialStore';
 
-import { requireSession, clearSession } from "@/lib/session";
-import { uidFromToken, badgeCounts } from "@/lib/socialStore";
-
-type ActiveTab =
-  | "discover"
-  | "matches"
-  | "messages"
-  | "profile"
-  | "advanced-search"
-  | "account"
-  | "subscribe"
-  | "debug";
+export type ActiveTab =
+  | 'discover'
+  | 'matches'
+  | 'messages'
+  | 'profile'
+  | 'advanced-search'
+  | 'account'
+  | 'subscribe'
+  | 'debug';
 
 type Counts = {
-  total: number;      // total notifications (matches + messages)
-  matches: number;    // new/unopened matches
-  messages: number;   // unread messages
+  total: number;
+  matches: number;
+  messages: number;
 };
 
 function clamp(n: unknown): number {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return 0;
-  return Math.max(0, Math.floor(x));
+  const x = typeof n === 'number' ? n : Number(n);
+  if (!Number.isFinite(x) || x <= 0) return 0;
+  return Math.floor(x);
 }
 
 function Badge({ n }: { n: number }) {
-  if (!n || n <= 0) return null;
+  if (!n) return null;
+  const txt = n > 99 ? '99+' : String(n);
   return (
     <span
-      aria-label={`${n}`}
+      aria-label={`${txt} notifications`}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
+        marginLeft: 8,
         minWidth: 18,
         height: 18,
-        padding: "0 6px",
+        padding: '0 6px',
         borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 700,
-        lineHeight: "18px",
-        background: "#ff2d55",
-        color: "#fff",
-        marginLeft: 8,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 11,
+        fontWeight: 800,
+        lineHeight: '18px',
+        background: '#ff3b30',
+        color: '#fff',
+        boxShadow: '0 6px 16px rgba(0,0,0,0.28)',
       }}
     >
-      {n}
+      {txt}
     </span>
   );
 }
 
-function Dot({ show }: { show: boolean }) {
-  if (!show) return null;
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        top: -2,
-        right: -2,
-        width: 10,
-        height: 10,
-        borderRadius: 999,
-        background: "#ff2d55",
-        boxShadow: "0 0 0 2px rgba(0,0,0,0.6)",
-      }}
-    />
-  );
-}
-
-export default function AppHeader(props: { active?: ActiveTab }) {
+export default function AppHeader(props: {
+  active?: ActiveTab;
+  onResetDeck?: () => void;
+  onRefreshDeck?: () => void;
+}) {
+  const router = useRouter();
   const pathname = usePathname();
+
+  const active: ActiveTab | undefined =
+    props.active ??
+    (pathname?.startsWith('/matches')
+      ? 'matches'
+      : pathname?.startsWith('/messages') || pathname?.startsWith('/chat')
+        ? 'messages'
+        : pathname?.startsWith('/profile')
+          ? 'profile'
+          : pathname?.startsWith('/advanced-search')
+            ? 'advanced-search'
+            : pathname?.startsWith('/account')
+              ? 'account'
+              : pathname?.startsWith('/subscribe')
+                ? 'subscribe'
+                : pathname?.startsWith('/debug')
+                  ? 'debug'
+                  : 'discover');
+
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<Counts>({ total: 0, matches: 0, messages: 0 });
 
-  const active = useMemo<ActiveTab | undefined>(() => {
-    if (props.active) return props.active;
-    if (!pathname) return undefined;
-    if (pathname.startsWith("/discover")) return "discover";
-    if (pathname.startsWith("/matches")) return "matches";
-    if (pathname.startsWith("/messages")) return "messages";
-    if (pathname.startsWith("/chat")) return "messages";
-    if (pathname.startsWith("/advanced-search")) return "advanced-search";
-    if (pathname.startsWith("/account")) return "account";
-    if (pathname.startsWith("/subscribe")) return "subscribe";
-    if (pathname.startsWith("/profile")) return "profile";
-    return undefined;
-  }, [pathname, props.active]);
-
-  const token = useMemo(() => {
+  const uid = useMemo(() => {
     try {
-      return requireSession();
+      const token = requireSession();
+      return uidFromToken(token) || 'anon';
     } catch {
-      return null as any;
+      return 'anon';
     }
   }, []);
 
-  const uid = useMemo(() => {
-    if (!token) return null;
-    try {
-      return uidFromToken(token);
-    } catch {
-      return null;
-    }
-  }, [token]);
-
   useEffect(() => {
-    if (!uid) {
-      setCounts({ total: 0, matches: 0, messages: 0 });
-      return;
-    }
-
+    let alive = true;
     const tick = () => {
       try {
-        const raw: any = badgeCounts(uid);
+        const raw = badgeCounts(uid);
         const next: Counts = {
           total: clamp(raw?.total ?? (raw?.matches ?? 0) + (raw?.messages ?? 0)),
-          matches: clamp(raw?.matches ?? raw?.newMatches ?? 0),
-          messages: clamp(raw?.messages ?? raw?.unreadMessages ?? 0),
+          matches: clamp(raw?.matches ?? 0),
+          messages: clamp(raw?.messages ?? 0),
         };
-        setCounts(next);
+        if (alive) setCounts(next);
       } catch {
-        // ignore
+        if (alive) setCounts({ total: 0, matches: 0, messages: 0 });
       }
     };
-
     tick();
-
-    // Poll lightly because this app stores in localStorage and other tabs may update.
-    const t = window.setInterval(tick, 800);
-    return () => window.clearInterval(t);
+    const t = window.setInterval(tick, 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
   }, [uid]);
 
-  // close menu when route changes
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
+  const showHamburgerDot = counts.total > 0;
 
-  const MenuLink = ({
-    href,
-    label,
-    tab,
-    badge,
-  }: {
-    href: string;
-    label: string;
-    tab?: ActiveTab;
-    badge?: number;
-  }) => {
-    const isActive = tab && active === tab;
-    return (
-      <Link
-        href={href}
-        onClick={() => setOpen(false)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          padding: "8px 10px",
-          borderRadius: 10,
-          color: "rgba(255,255,255,0.92)",
-          textDecoration: "none",
-          background: isActive ? "rgba(255,255,255,0.10)" : "transparent",
-        }}
-      >
-        <span style={{ display: "inline-flex", alignItems: "center" }}>
-          {label}
-          {!!badge && badge > 0 ? <Badge n={badge} /> : null}
-        </span>
-        <span aria-hidden="true" style={{ opacity: 0.4 }}>
-          ›
-        </span>
-      </Link>
-    );
+  const rowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    padding: '10px 12px',
+    fontSize: 13,
+    borderRadius: 10,
+    color: 'rgba(255,255,255,0.92)',
+    textDecoration: 'none',
+    cursor: 'pointer',
+    userSelect: 'none',
   };
+
+  const rowActiveStyle: React.CSSProperties = {
+    ...rowStyle,
+    background: 'rgba(255,255,255,0.10)',
+  };
+
+  function go(path: string) {
+    setOpen(false);
+    router.push(path);
+  }
+
+  function logout() {
+    setOpen(false);
+    clearSession();
+    router.push('/login');
+  }
 
   return (
     <header
       style={{
-        position: "sticky",
+        position: 'sticky',
         top: 0,
-        zIndex: 50,
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
-        background: "rgba(10,10,14,0.25)",
-        borderBottom: "1px solid rgba(255,255,255,0.10)",
+        zIndex: 1000,
+        padding: '10px 14px',
+        background: 'rgba(8, 4, 12, 0.52)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        overflow: 'visible',
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "10px 14px",
-          minHeight: 54,
-        }}
-      >
-        <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
           <button
             type="button"
-            aria-label="Menu"
             onClick={() => setOpen((v) => !v)}
+            aria-label="Open menu"
             style={{
-              position: "relative",
-              width: 36,
-              height: 36,
+              width: 34,
+              height: 34,
               borderRadius: 12,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(0,0,0,0.25)",
-              color: "rgba(255,255,255,0.95)",
-              cursor: "pointer",
+              border: '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(255,255,255,0.06)',
+              color: 'rgba(255,255,255,0.92)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 16,
+              lineHeight: '16px',
+              position: 'relative',
+              overflow: 'visible',
             }}
           >
-            <span aria-hidden="true" style={{ fontSize: 18, lineHeight: "36px" }}>
-              ☰
-            </span>
-            <Dot show={counts.total > 0} />
+            ☰
+            {showHamburgerDot ? (
+              <span
+                aria-label="Notifications"
+                style={{
+                  position: 'absolute',
+                  top: -3,
+                  right: -3,
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  background: '#ff3b30',
+                  boxShadow: '0 8px 20px rgba(0,0,0,0.35)',
+                  border: '2px solid rgba(8, 4, 12, 0.80)',
+                  pointerEvents: 'none',
+                }}
+              />
+            ) : null}
           </button>
 
-          {open ? (
-            <nav
-              role="menu"
-              aria-label="Main menu"
-              style={{
-                position: "absolute",
-                top: 42,
-                left: 0,
-                width: 240,
-                padding: 10,
-                borderRadius: 14,
-                border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(12,12,18,0.92)",
-                boxShadow: "0 12px 40px rgba(0,0,0,0.45)",
-                overflow: "visible",
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <MenuLink href="/discover" label="Discover" tab="discover" />
-                <MenuLink href="/matches" label="Matches" tab="matches" badge={counts.matches} />
-                <MenuLink href="/messages" label="Messages" tab="messages" badge={counts.messages} />
-                <MenuLink href="/advanced-search" label="Advanced Search" tab="advanced-search" />
-                <MenuLink href="/profile" label="Profile" tab="profile" />
-                <MenuLink href="/account" label="Account Details" tab="account" />
-                <MenuLink href="/subscribe" label="Subscribe" tab="subscribe" />
-
-                <div style={{ height: 1, margin: "8px 0", background: "rgba(255,255,255,0.10)" }} />
-
-                {/* Debug bucket (temporary) */}
-                <div style={{ padding: "6px 10px", fontSize: 12, opacity: 0.8 }}>
-                  DEBUG
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    try {
-                      localStorage.removeItem("ff:deck");
-                      localStorage.removeItem("ff:discoverDeck");
-                      localStorage.removeItem("ff:discover:index");
-                    } catch {}
-                    setOpen(false);
-                    // reload current page
-                    try { window.location.reload(); } catch {}
-                  }}
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "none",
-                    background: "transparent",
-                    color: "rgba(255,255,255,0.92)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Reset deck
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    try { window.location.reload(); } catch {}
-                  }}
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "none",
-                    background: "transparent",
-                    color: "rgba(255,255,255,0.92)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Refresh
-                </button>
-
-                <div style={{ height: 1, margin: "8px 0", background: "rgba(255,255,255,0.10)" }} />
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    try {
-                      clearSession();
-                    } catch {}
-                    setOpen(false);
-                    try {
-                      window.location.href = "/login";
-                    } catch {}
-                  }}
-                  style={{
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    borderRadius: 10,
-                    border: "none",
-                    background: "rgba(255,255,255,0.08)",
-                    color: "rgba(255,255,255,0.95)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Logout
-                </button>
-              </div>
-            </nav>
-          ) : null}
-
-          <div style={{ fontWeight: 800, color: "rgba(255,255,255,0.92)" }}>FrugalFetishes</div>
-        </div>
-
-        {/* Right side: keep simple */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Optional quick link - keeps existing UX */}
-          <Link
-            href="/discover"
-            style={{
-              color: "rgba(255,255,255,0.70)",
-              textDecoration: "none",
-              fontSize: 13,
-            }}
-          >
-            {active ? active[0].toUpperCase() + active.slice(1).replace("-", " ") : ""}
+          <Link href="/discover" style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 800, textDecoration: 'none' }}>
+            FrugalFetishes
           </Link>
         </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            type="button"
+            onClick={logout}
+            style={{
+              borderRadius: 999,
+              padding: '8px 12px',
+              border: '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(255,255,255,0.06)',
+              color: 'rgba(255,255,255,0.92)',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </div>
+
+      {open ? (
+        <div
+          style={{
+            position: 'absolute',
+            left: 14,
+            top: 54,
+            width: 240,
+            borderRadius: 14,
+            padding: 8,
+            background: 'rgba(12, 8, 18, 0.92)',
+            border: '1px solid rgba(255,255,255,0.10)',
+            boxShadow: '0 22px 60px rgba(0,0,0,0.45)',
+            overflow: 'visible',
+          }}
+        >
+          <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7 }}>Navigation</div>
+
+          <div
+            style={active === 'discover' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/discover')}
+            role="menuitem"
+          >
+            <span>Discover</span>
+          </div>
+
+          <div
+            style={active === 'matches' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/matches')}
+            role="menuitem"
+          >
+            <span>Matches</span>
+            <Badge n={counts.matches} />
+          </div>
+
+          <div
+            style={active === 'messages' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/messages')}
+            role="menuitem"
+          >
+            <span>Messages</span>
+            <Badge n={counts.messages} />
+          </div>
+
+          <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7, marginTop: 4 }}>Search</div>
+
+          <div
+            style={active === 'advanced-search' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/advanced-search')}
+            role="menuitem"
+          >
+            <span>Advanced search</span>
+          </div>
+
+          <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7, marginTop: 4 }}>You</div>
+
+          <div
+            style={active === 'profile' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/profile')}
+            role="menuitem"
+          >
+            <span>Profile</span>
+          </div>
+
+          <div
+            style={active === 'account' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/account')}
+            role="menuitem"
+          >
+            <span>Account details</span>
+          </div>
+
+          <div
+            style={active === 'subscribe' ? rowActiveStyle : rowStyle}
+            onClick={() => go('/subscribe')}
+            role="menuitem"
+          >
+            <span>Subscribe</span>
+          </div>
+
+          {(props.onResetDeck || props.onRefreshDeck) ? (
+            <>
+              <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7, marginTop: 4 }}>Debug</div>
+
+              {props.onResetDeck ? (
+                <div
+                  style={active === 'debug' ? rowActiveStyle : rowStyle}
+                  onClick={() => {
+                    setOpen(false);
+                    props.onResetDeck?.();
+                  }}
+                  role="menuitem"
+                >
+                  <span>Reset deck</span>
+                </div>
+              ) : null}
+
+              {props.onRefreshDeck ? (
+                <div
+                  style={active === 'debug' ? rowActiveStyle : rowStyle}
+                  onClick={() => {
+                    setOpen(false);
+                    props.onRefreshDeck?.();
+                  }}
+                  role="menuitem"
+                >
+                  <span>Refresh</span>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
+          <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7, marginTop: 4 }}>Session</div>
+
+          <div style={rowStyle} onClick={logout} role="menuitem">
+            <span>Logout</span>
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }
