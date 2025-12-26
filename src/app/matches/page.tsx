@@ -1,73 +1,57 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import AppHeader from '@/components/AppHeader';
-import { requireSession } from '@/lib/session';
-import { uidFromToken, getMatchesFor, clearNewMatches, type Match } from '@/lib/socialStore';
-
-function otherUid(m: Match, me: string) {
-  return m.a === me ? m.b : m.a;
-}
+import { useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import AppHeader from "@/components/AppHeader";
+import { requireSession } from "@/lib/session";
+import { uidFromToken, listMatchesForUid, loadUserProfileSnapshot, markAllMatchesSeen } from "@/lib/socialStore";
 
 export default function MatchesPage() {
-  const token = useMemo(() => {
-    try { return requireSession(); } catch { return null as any; }
-  }, []);
-  const uid = useMemo(() => uidFromToken(token) ?? 'anon', [token]);
+  const router = useRouter();
 
-  const [matches, setMatches] = useState<Match[]>([]);
+  const token = useMemo(() => {
+    try { return requireSession(); } catch { return null; }
+  }, []);
+
+  const uid = useMemo(() => uidFromToken(token) || "anon", [token]);
+
+  const matches = useMemo(() => listMatchesForUid(uid), [uid]);
 
   useEffect(() => {
-    try {
-      // Clear the "new match" badge when you open the matches screen
-      clearNewMatches(uid);
-    } catch {}
-    try {
-      setMatches(getMatchesFor(uid));
-    } catch {
-      setMatches([]);
-    }
+    // visiting /matches marks them as seen (so the header badge clears)
+    try { markAllMatchesSeen(uid); } catch {}
   }, [uid]);
 
   return (
-    <div className="ff-page">
+    <div className="min-h-screen">
       <AppHeader active="matches" />
-      <main className="ff-shell">
-        <h2 className="ff-h2">Matches</h2>
+
+      <main className="mx-auto max-w-4xl px-4 py-6">
+        <h1 className="text-xl font-semibold mb-4">Matches</h1>
 
         {matches.length === 0 ? (
-          <div className="ff-card">
-            <div className="ff-muted">No matches yet.</div>
-            <div className="ff-muted" style={{ marginTop: 8 }}>
-              Tip: A match happens only when <b>both</b> users like each other.
-            </div>
-          </div>
+          <p className="opacity-80">No matches yet. Swipe right on Discover and make sure the other account likes you back.</p>
         ) : (
-          <div className="ff-grid">
+          <div className="space-y-3">
             {matches.map((m) => {
-              const other = otherUid(m, uid);
-              const title = other || m.id;
-              const subtitle =
-                m.lastMessageText
-                  ? m.lastMessageText
-                  : m.lastMessageAt
-                    ? 'Last message'
-                    : 'New match';
+              const otherUid = m.a === uid ? m.b : m.a;
+              const p = loadUserProfileSnapshot(otherUid);
+              const label = p?.name ? `${p.name}${p.age ? `, ${p.age}` : ""}` : otherUid;
 
               return (
-                <Link key={m.id} className="ff-card ff-match-row" href={`/matches/${m.id}`}>
-                  <div className="ff-match-left">
-                    <div className="ff-avatar" aria-hidden="true">{(title || 'U')[0]?.toUpperCase()}</div>
+                <div key={m.id} className="rounded-xl border border-white/10 bg-white/5 p-4 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{label}</div>
+                    <div className="text-sm opacity-80 truncate">{p?.city || ""}</div>
                   </div>
-                  <div className="ff-match-mid">
-                    <div className="ff-match-name">{title}</div>
-                    <div className="ff-muted">{subtitle}</div>
-                  </div>
-                  <div className="ff-match-right">
-                    <span className="ff-pill">Open</span>
-                  </div>
-                </Link>
+
+                  <button
+                    className="rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15"
+                    onClick={() => router.push(`/matches/${m.id}`)}
+                  >
+                    Open
+                  </button>
+                </div>
               );
             })}
           </div>
