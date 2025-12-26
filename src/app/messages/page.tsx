@@ -1,22 +1,63 @@
 'use client';
 
-import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import AppHeader from '@/components/AppHeader';
-import { requireSession } from '@/lib/session';
-import { uidFromToken, getMatchesFor, getChat } from '@/lib/socialStore';
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import AppHeader from "@/components/AppHeader";
+import { requireSession } from "@/lib/session";
+import { uidFromToken, getMatchesFor, loadUserProfileSnapshot, type Match } from "@/lib/socialStore";
 
 type Row = {
   matchId: string;
-  otherId: string;
-  lastText: string;
+  otherUid: string;
+  name: string;
+  photo: string;
   lastTs: number;
+  unread: number;
 };
 
-function shortId(uid: string): string {
-  if (!uid) return 'User';
-  if (uid.includes('@')) return uid.split('@')[0] || uid;
-  return uid.slice(0, 8);
+function safeNum(v: any): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function displayNameFromProfile(p: any, fallbackUid: string) {
+  const name =
+    p?.displayName ||
+    p?.name ||
+    p?.fullName ||
+    p?.username ||
+    p?.email?.split?.("@")?.[0];
+
+  if (typeof name === "string" && name.trim()) return name.trim();
+  // fallback: short uid
+  if (typeof fallbackUid === "string" && fallbackUid.includes("@")) return fallbackUid.split("@")[0];
+  return (fallbackUid || "User").slice(0, 8);
+}
+
+function photoFromProfile(p: any) {
+  return (
+    p?.photoUrl ||
+    p?.avatarUrl ||
+    p?.photoURL ||
+    p?.avatar ||
+    "/icon.png"
+  );
+}
+
+function toMatchId(m: any): string {
+  if (!m) return "";
+  if (typeof m === "string") return m;
+  if (typeof m.id === "string") return m.id;
+  return String(m.id ?? "");
+}
+
+function otherUidFromMatch(m: any, uid: string): string {
+  const a = (m as any).a ?? (m as any).userA ?? (m as any).uidA;
+  const b = (m as any).b ?? (m as any).userB ?? (m as any).uidB;
+  if (a === uid) return String(b ?? "");
+  if (b === uid) return String(a ?? "");
+  // fallback if shape is unknown
+  return String(b ?? a ?? "");
 }
 
 export default function MessagesPage() {
@@ -28,60 +69,107 @@ export default function MessagesPage() {
     }
   }, []);
 
-  const uid = useMemo(() => uidFromToken(token), [token]);
-
-  const [rows] = useState<Row[]>(() => {
-    let matches: any[] = [];
+  const uid = useMemo(() => {
+    if (!token) return null;
     try {
-      matches = getMatchesFor(uid) as any[];
-    } catch {}
+      return uidFromToken(token);
+    } catch {
+      return null;
+    }
+  }, [token]);
+
+  const [rows, setRows] = useState<Row[]>([]);
+
+  useEffect(() => {
+    if (!uid) {
+      setRows([]);
+      return;
+    }
+
+    // Build list from local store (matches + chat summaries).
+    let matches: Match[] = [];
+    try {
+      matches = (getMatchesFor(uid) as any[]) as Match[];
+    } catch {
+      matches = [];
+    }
 
     const out: Row[] = [];
     for (const m of matches) {
-      const matchId = String((m as any).id ?? m);
-      const a = String((m as any).a ?? (m as any).userA ?? '');
-      const b = String((m as any).b ?? (m as any).userB ?? '');
-      const otherId = a === uid ? b : a;
+      const matchId = toMatchId(m);
+      if (!matchId) continue;
 
-      let msgs: any[] = [];
-      try {
-        msgs = getChat(matchId) as any[];
-      } catch {}
+      const otherUid = otherUidFromMatch(m as any, uid);
+      const p = (() => {
+        try {
+          return loadUserProfileSnapshot(otherUid) as any;
+        } catch {
+          return null;
+        }
+      })();
 
-      if (!msgs || msgs.length === 0) continue;
+      const lastTs =
+        safeNum((m as any).lastMessageAt) ||
+        safeNum((m as any).lastTs) ||
+        safeNum((m as any).updatedAt) ||
+        safeNum((m as any).createdAt) ||
+        Date.now();
 
-      const last = msgs[msgs.length - 1] as any;
+      const unread =
+        safeNum((m as any).unread?.[uid]) ||
+        safeNum((m as any).unreadCount?.[uid]) ||
+        safeNum((m as any).unreadCount) ||
+        0;
+
       out.push({
         matchId,
-        otherId,
-        lastText: String(last?.text ?? ''),
-        lastTs: Number(last?.createdAt ?? 0),
+        otherUid,
+        name: displayNameFromProfile(p, otherUid),
+        photo: photoFromProfile(p),
+        lastTs,
+        unread,
       });
     }
 
-    out.sort((x, y) => (y.lastTs || 0) - (x.lastTs || 0));
-    return out;
-  });
+    out.sort((a, b) => b.lastTs - a.lastTs);
+    setRows(out);
+  }, [uid]);
 
   return (
     <div className="ff-page">
-      <AppHeader active="messages" />
+      <AppHeader active="chat" />
       <div className="ff-shell">
         <h1 className="ff-h1">Messages</h1>
 
-        {rows.length === 0 ? (
-          <p className="ff-muted">No messages yet. Match someone first, then send a message.</p>
+        {!uid ? (
+          <div className="ff-muted">
+            You’re not logged in. Go to <Link href="/login">Login</Link>.
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="ff-muted">
+            No conversations yet. Match with someone first.
+          </div>
         ) : (
           <div className="ff-list">
             {rows.map((r) => (
               <div key={r.matchId} className="ff-row">
                 <div className="ff-row-left">
-                  <div className="ff-avatar">{shortId(r.otherId).slice(0, 1).toUpperCase()}</div>
+                  <img className="ff-avatar" src={r.photo} alt={r.name} />
                   <div className="ff-row-text">
-                    <div className="ff-row-title">{shortId(r.otherId)}</div>
-                    <div className="ff-row-sub">{r.lastText || '—'}</div>
+                    <div className="ff-row-title">
+                      {r.name}
+                      {r.unread > 0 ? (
+                        <span className="ff-badge" style={{ marginLeft: 8 }}>
+                          {r.unread}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="ff-row-sub">
+                      {new Date(r.lastTs).toLocaleString()}
+                    </div>
                   </div>
                 </div>
+
                 <Link className="ff-btn" href={`/chat/${encodeURIComponent(r.matchId)}`}>
                   Open
                 </Link>
@@ -90,73 +178,6 @@ export default function MessagesPage() {
           </div>
         )}
       </div>
-
-      <style jsx>{`
-        .ff-shell {
-          max-width: 860px;
-          margin: 0 auto;
-          padding: 18px;
-        }
-        .ff-h1 {
-          font-size: 28px;
-          margin: 10px 0 16px;
-        }
-        .ff-muted {
-          opacity: 0.8;
-        }
-        .ff-list {
-          display: grid;
-          gap: 12px;
-        }
-        .ff-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          padding: 12px;
-          border-radius: 14px;
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(0,0,0,0.12);
-        }
-        .ff-row-left {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          min-width: 0;
-        }
-        .ff-avatar {
-          width: 38px;
-          height: 38px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.18);
-          display: grid;
-          place-items: center;
-          background: rgba(255,255,255,0.06);
-          flex: 0 0 auto;
-        }
-        .ff-row-text {
-          min-width: 0;
-        }
-        .ff-row-title {
-          font-weight: 700;
-        }
-        .ff-row-sub {
-          opacity: 0.85;
-          font-size: 13px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 520px;
-        }
-        .ff-btn {
-          padding: 8px 12px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.18);
-          background: rgba(0,0,0,0.15);
-          color: rgba(255,255,255,0.9);
-          text-decoration: none;
-        }
-      `}</style>
     </div>
   );
 }
