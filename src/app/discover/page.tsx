@@ -1,11 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-
-import { apiGet, apiPost } from '@/lib/api';
-import { loadSession } from '@/lib/session';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { apiGet, apiPost } from "@/lib/api";
 
 type Profile = {
   id: string;
@@ -13,687 +9,404 @@ type Profile = {
   age?: number;
   city?: string;
   bio?: string;
-  interests?: string[];
-  photoUrl?: string | null;
-  photos?: string[] | null;
+
+  // Common photo fields (we will pick from these ONLY, no demo/random photos)
+  photoUrl?: string;
+  profilePhotoUrl?: string;
+  primaryPhotoUrl?: string;
+  mainPhotoUrl?: string;
+  imageUrl?: string;
+  avatarUrl?: string;
+
+  photos?: Array<string | { url?: string }>;
+  images?: Array<string | { url?: string }>;
+  gallery?: Array<string | { url?: string }>;
 };
 
-type FeedResponse =
-  | { ok: true; profiles: Profile[] }
-  | { ok: true; users: Profile[] }
-  | { ok: true; feed: Profile[] }
-  | { ok: true; data: any }
-  | { ok: false; error?: string }
-  | any;
-
-function toText(v: any): string {
-  if (v == null) return '';
-  if (typeof v === 'string') return v;
-  try { return String(v); } catch { return ''; }
-}
-
-function normalizePhotoUrl(url: any): string | null {
-  const s = toText(url).trim();
+function normalizePublicPath(u?: string | null): string | null {
+  if (!u) return null;
+  let s = String(u).trim();
   if (!s) return null;
-  if (s.startsWith('data:image/')) return s;
-  if (s.startsWith('http://') || s.startsWith('https://')) return s;
-  if (s.startsWith('/')) return s;
-  // Some backends return just the filename stored in /public
-  if (!s.includes('/') && (s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg') || s.endsWith('.webp'))) {
-    return `/${s}`;
-  }
+  // If backend stored "public/xyz.png" or "/public/xyz.png", Next serves it at "/xyz.png"
+  s = s.replace(/^\/?public\//, "/");
+  if (!s.startsWith("http") && !s.startsWith("/")) s = "/" + s;
   return s;
 }
 
-function pickProfilePhoto(p: Profile | null): string | null {
+function pickPhotoUrl(p: any): string | null {
   if (!p) return null;
-  const fromArray = Array.isArray(p.photos) ? p.photos.find(Boolean) : null;
-  return normalizePhotoUrl(fromArray || p.photoUrl || null);
+
+  const direct =
+    p.photoUrl ||
+    p.profilePhotoUrl ||
+    p.primaryPhotoUrl ||
+    p.mainPhotoUrl ||
+    p.imageUrl ||
+    p.avatarUrl;
+
+  const normalizedDirect = normalizePublicPath(direct);
+  if (normalizedDirect) return normalizedDirect;
+
+  const arrays = [p.photos, p.images, p.gallery];
+  for (const arr of arrays) {
+    if (Array.isArray(arr) && arr.length > 0) {
+      const first = arr[0];
+      if (typeof first === "string") {
+        const n = normalizePublicPath(first);
+        if (n) return n;
+      } else if (first && typeof first === "object" && typeof first.url === "string") {
+        const n = normalizePublicPath(first.url);
+        if (n) return n;
+      }
+    }
+  }
+
+  return null;
 }
 
-function placeholderAvatarDataUri(name?: string) {
-  const initials = (name || 'User')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join('');
-
-  const svg = `
-  <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800">
-    <defs>
-      <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-        <stop offset="0" stop-color="#4b134f"/>
-        <stop offset="1" stop-color="#1d0b2a"/>
-      </linearGradient>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#g)"/>
-    <circle cx="400" cy="320" r="140" fill="rgba(255,255,255,0.10)"/>
-    <text x="50%" y="56%" dominant-baseline="middle" text-anchor="middle"
-      font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial"
-      font-size="150" fill="rgba(255,255,255,0.85)" font-weight="700">${initials || 'U'}</text>
-  </svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
 }
 
 export default function DiscoverPage() {
-  const router = useRouter();
-
-  // ---------- auth guard (client-side) ----------
-  useEffect(() => {
-    const token = loadSession();
-    if (!token) router.push('/login');
-  }, [router]);
-
-  // ---------- feed ----------
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [cursor, setCursor] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<string>('');
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [idx, setIdx] = useState(0);
+  const [status, setStatus] = useState<string>("");
 
-  // Restore swipe overlays + expanded sheet behavior
-  const [expanded, setExpanded] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const current = useMemo(() => profiles[cursor] ?? null, [profiles, cursor]);
-  const currentPhoto = useMemo(() => pickProfilePhoto(current), [current]);
+  const top = profiles[idx] ?? null;
 
-  // ---------- swipe state ----------
-  const startRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
-  const [drag, setDrag] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const [busy, setBusy] = useState(false);
+  // Swipe state
+  const startX = useRef<number | null>(null);
+  const startY = useRef<number | null>(null);
+  const dxRef = useRef<number>(0);
+  const dyRef = useRef<number>(0);
+  const dragging = useRef(false);
 
-  function showToast(msg: string) {
-    setToast(msg);
-    window.clearTimeout((showToast as any)._t);
-    (showToast as any)._t = window.setTimeout(() => setToast(''), 2200);
-  }
+  const photo = useMemo(() => pickPhotoUrl(top), [top]);
 
-  function extractList(res: FeedResponse): Profile[] {
-    if (!res) return [];
-    const raw =
-      (Array.isArray(res.profiles) && res.profiles) ||
-      (Array.isArray(res.users) && res.users) ||
-      (Array.isArray(res.feed) && res.feed) ||
-      (Array.isArray(res.data) && res.data) ||
-      [];
+  const overlay = useMemo(() => {
+    const dx = dxRef.current;
+    if (!dragging.current) return null;
+    if (Math.abs(dx) < 30) return null;
+    return dx > 0 ? "LIKE" : "PASS";
+  }, [idx, sheetOpen]);
 
-    // Normalize + filter obviously bad entries (this prevents “random” placeholder cards)
-    const list: Profile[] = raw
-      .map((u: any) => ({
-        id: toText(u?.id || u?._id || u?.uid || u?.userId || ""),
-        name: toText(u?.name || u?.displayName || u?.username || "Unknown"),
-        age: typeof u?.age === "number" ? u.age : Number(u?.age) || undefined,
-        city: toText(u?.city || u?.location?.city || u?.profileCity || ""),
-        bio: toText(u?.bio || u?.about || u?.profileBio || ""),
-        // Prefer explicit profile photo fields first, then fall back.
-        photoUrl: toText(
-          u?.profilePhotoUrl ||
-            u?.primaryPhotoUrl ||
-            u?.mainPhotoUrl ||
-            u?.imageUrl ||
-            u?.photoUrl ||
-            u?.photoURL ||
-            u?.photo ||
-            u?.avatarUrl ||
-            u?.avatar
-        ),
-        // Collect any array-style photo fields.
-        photos: Array.isArray(u?.photos)
-          ? u.photos
-          : Array.isArray(u?.images)
-            ? u.images
-            : Array.isArray(u?.pictures)
-              ? u.pictures
-              : Array.isArray(u?.gallery)
-                ? u.gallery
-                : [],
-        interests: Array.isArray(u?.interests)
-          ? u.interests
-          : Array.isArray(u?.kinks)
-            ? u.kinks
-            : [],
-      }))
-      .filter((u) => !!u.id);
-
-    return list;
-  }
-
-  async function loadFeed() {
-    setLoading(true);
-    try {
-      const res = await apiGet('/api/feed');
-      const list = extractList(res);
-
-      if (!list.length) {
-        setProfiles([]);
-        setCursor(0);
-        showToast('No more profiles available right now.');
-        return;
-      }
-
-      setProfiles(list);
-      setCursor(0);
-    } catch (e: any) {
-      showToast(e?.message ? `Feed error: ${e.message}` : 'Feed error');
-      setProfiles([]);
-      setCursor(0);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const transform = useMemo(() => {
+    const dx = dxRef.current;
+    const rot = clamp(dx / 18, -12, 12);
+    return `translateX(${dx}px) rotate(${rot}deg)`;
+  }, [idx, sheetOpen]);
 
   useEffect(() => {
-    loadFeed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    (async () => {
+      try {
+        const res: any = await apiGet("/api/feed");
+        const list: any[] = Array.isArray(res?.profiles) ? res.profiles : Array.isArray(res) ? res : [];
+        setProfiles(list as Profile[]);
+        setIdx(0);
+        setStatus(list.length ? "Ready" : "No profiles returned from /api/feed.");
+      } catch (e: any) {
+        setStatus(e?.message ? String(e.message) : "Failed to load feed.");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  function resetSwipeState() {
-    startRef.current = null;
-    dragRef.current = null;
-    setDrag({ dx: 0, dy: 0 });
+  function resetDrag() {
+    dragging.current = false;
+    startX.current = null;
+    startY.current = null;
+    dxRef.current = 0;
+    dyRef.current = 0;
   }
 
-  async function sendDecision(decision: 'like' | 'pass') {
-    if (!current || busy) return;
-    setBusy(true);
-    try {
-      // Best-effort: backend call, ignore failures so UI still works
-      try {
-        await apiPost('/api/decision', { targetUserId: current.id, decision });
-      } catch {}
+  function nextCard() {
+    resetDrag();
+    setIdx((v) => Math.min(v + 1, profiles.length));
+  }
 
-      setCursor((c) => c + 1);
-      resetSwipeState();
-      setExpanded(false);
-    } finally {
-      setBusy(false);
+  async function sendDecision(decision: "like" | "pass") {
+    if (!top?.id) return;
+    // best effort: ignore errors so UI remains responsive
+    try {
+      await apiPost("/api/decision", { targetUserId: top.id, decision });
+    } catch {
+      // ignore
     }
   }
 
-  // ---------- pointer handlers ----------
-  const SWIPE_X = 120;   // px for like/pass commit
-  const SHEET_UP = 90;   // px for expand
-  const SHEET_DOWN = 90; // px for close expanded
+  async function like() {
+    if (!top) return;
+    setStatus("Liked.");
+    await sendDecision("like");
+    nextCard();
+  }
+
+  async function pass() {
+    if (!top) return;
+    setStatus("Passed.");
+    await sendDecision("pass");
+    nextCard();
+  }
 
   function onPointerDown(e: React.PointerEvent) {
-    if (busy) return;
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    startRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
-    dragRef.current = { dx: 0, dy: 0 };
-    setDrag({ dx: 0, dy: 0 });
+    if (sheetOpen) return;
+    dragging.current = true;
+    startX.current = e.clientX;
+    startY.current = e.clientY;
+    dxRef.current = 0;
+    dyRef.current = 0;
+    (e.currentTarget as any).setPointerCapture?.(e.pointerId);
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    if (!startRef.current) return;
-
-    const dx = e.clientX - startRef.current.x;
-    const dy = e.clientY - startRef.current.y;
-
-    dragRef.current = { dx, dy };
-    setDrag({ dx, dy });
+    if (!dragging.current || startX.current == null || startY.current == null || sheetOpen) return;
+    dxRef.current = e.clientX - startX.current;
+    dyRef.current = e.clientY - startY.current;
+    // force rerender
+    setIdx((v) => v);
   }
 
-  function onPointerUp() {
-    const d = dragRef.current;
-    resetSwipeState();
+  async function onPointerUp() {
+    if (!dragging.current) return;
 
-    if (!d || !current || busy) return;
+    const dx = dxRef.current;
+    const dy = dyRef.current;
 
-    const absX = Math.abs(d.dx);
-    const absY = Math.abs(d.dy);
+    const swipeX = 90;
+    const swipeUp = -90;
 
-    // Expanded sheet: swipe down to close
-    if (expanded) {
-      if (d.dy > SHEET_DOWN && absY > absX) {
-        setExpanded(false);
-      }
+    // Up-swipe opens sheet
+    if (!sheetOpen && Math.abs(dy) > Math.abs(dx) && dy < swipeUp) {
+      resetDrag();
+      setSheetOpen(true);
       return;
     }
 
-    // Not expanded:
-    // swipe up to expand (vertical dominant)
-    if (d.dy < -SHEET_UP && absY > absX) {
-      setExpanded(true);
-      return;
-    }
+    // Like / pass
+    if (!sheetOpen && dx > swipeX) return void like();
+    if (!sheetOpen && dx < -swipeX) return void pass();
 
-    // horizontal commit like/pass
-    if (absX >= SWIPE_X && absX > absY) {
-      if (d.dx > 0) sendDecision('like');
-      else sendDecision('pass');
-      return;
-    }
+    // Snap back
+    resetDrag();
+    setIdx((v) => v);
   }
 
-  // ---------- UI styles ----------
-  const page: React.CSSProperties = {
-    minHeight: '100vh',
-    padding: '14px 12px 28px',
-    background: 'radial-gradient(1200px 800px at 25% 20%, rgba(255,64,160,0.18), transparent 55%), radial-gradient(900px 700px at 80% 35%, rgba(120,70,255,0.18), transparent 55%), linear-gradient(180deg, #0a0712, #150820)'
-  };
+  function onSheetPointerDown(e: React.PointerEvent) {
+    // allow swipe-down to close
+    dragging.current = true;
+    startX.current = e.clientX;
+    startY.current = e.clientY;
+    dxRef.current = 0;
+    dyRef.current = 0;
+    (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+  }
 
-  const header: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    margin: '6px auto 18px',
-    maxWidth: 980,
-    position: 'relative'
-  };
+  function onSheetPointerMove(e: React.PointerEvent) {
+    if (!dragging.current || startY.current == null) return;
+    dyRef.current = e.clientY - startY.current;
+    setIdx((v) => v);
+  }
 
-  const titleWrap: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    minWidth: 0
-  };
+  function onSheetPointerUp() {
+    const dy = dyRef.current;
+    // Swipe down closes
+    if (dy > 90) {
+      resetDrag();
+      setSheetOpen(false);
+      return;
+    }
+    resetDrag();
+  }
 
-  const brandImg: React.CSSProperties = {
-    height: 34,
-    width: 'auto',
-    objectFit: 'contain',
-    filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))'
-  };
+  if (loading) return <div style={{ padding: 18 }}>Loading…</div>;
 
-  const title: React.CSSProperties = {
-    margin: 0,
-    fontSize: 20,
-    letterSpacing: 0.2,
-    color: 'rgba(255,255,255,0.92)'
-  };
-
-  const subtitle: React.CSSProperties = {
-    margin: 0,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.60)'
-  };
-
-  const cardWrap: React.CSSProperties = {
-    margin: '0 auto',
-    maxWidth: 420,
-    width: '100%',
-    position: 'relative'
-  };
-
-  const card: React.CSSProperties = {
-    width: '100%',
-    height: 560,
-    borderRadius: 22,
-    overflow: 'hidden',
-    border: '1px solid rgba(255,255,255,0.10)',
-    boxShadow: '0 26px 80px rgba(0,0,0,0.55)',
-    background: 'rgba(255,255,255,0.04)',
-    position: 'relative',
-    touchAction: 'none'
-  };
-
-  const imgStyle: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    transform: 'scale(1.01)',
-    filter: 'saturate(1.05) contrast(1.03)'
-  };
-
-  const gradientOverlay: React.CSSProperties = {
-    position: 'absolute',
-    inset: 0,
-    background:
-      'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 55%, rgba(0,0,0,0.78) 100%)'
-  };
-
-  const namePlate: React.CSSProperties = {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 16,
-    display: 'grid',
-    gap: 6
-  };
-
-  const nameLine: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 8,
-    justifyContent: 'space-between'
-  };
-
-  const nameText: React.CSSProperties = {
-    fontSize: 22,
-    fontWeight: 800,
-    color: 'rgba(255,255,255,0.95)',
-    textShadow: '0 8px 22px rgba(0,0,0,0.55)'
-  };
-
-  const small: React.CSSProperties = {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.70)'
-  };
-
-  const actions: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    position: 'absolute',
-    bottom: 18,
-    right: 16
-  };
-
-  const iconBtn = (kind: 'pass' | 'view' | 'like'): React.CSSProperties => ({
-    width: kind === 'view' ? 42 : 46,
-    height: kind === 'view' ? 42 : 46,
-    borderRadius: 999,
-    border: '1px solid rgba(255,255,255,0.16)',
-    background:
-      kind === 'like'
-        ? 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.20), rgba(255,64,160,0.22))'
-        : kind === 'pass'
-        ? 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), rgba(110,110,110,0.18))'
-        : 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), rgba(120,70,255,0.18))',
-    boxShadow: '0 16px 34px rgba(0,0,0,0.38)',
-    display: 'grid',
-    placeItems: 'center',
-    color: 'rgba(255,255,255,0.92)',
-    cursor: 'pointer',
-    userSelect: 'none'
-  });
-
-  const overlayLabel: React.CSSProperties = {
-    position: 'absolute',
-    top: 22,
-    left: 22,
-    padding: '10px 14px',
-    borderRadius: 16,
-    border: '1px solid rgba(255,255,255,0.18)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
-    fontWeight: 900,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: '#fff',
-    boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
-    pointerEvents: 'none'
-  };
-
-  const sheet: React.CSSProperties = {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(15, 8, 24, 0.88)',
-    borderTop: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: '22px 22px 0 0',
-    padding: '16px 16px 18px',
-    transform: expanded ? 'translateY(0)' : 'translateY(72%)',
-    transition: 'transform 220ms ease',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)'
-  };
-
-  const sheetHandle: React.CSSProperties = {
-    width: 52,
-    height: 6,
-    borderRadius: 999,
-    background: 'rgba(255,255,255,0.20)',
-    margin: '0 auto 12px'
-  };
-
-  const sheetTitle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 8
-  };
-
-  const sheetName: React.CSSProperties = {
-    fontSize: 20,
-    fontWeight: 900,
-    color: 'rgba(255,255,255,0.95)',
-    margin: 0
-  };
-
-  const chipRow: React.CSSProperties = {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10
-  };
-
-  const chip: React.CSSProperties = {
-    padding: '6px 10px',
-    borderRadius: 999,
-    background: 'rgba(255,255,255,0.08)',
-    border: '1px solid rgba(255,255,255,0.10)',
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.78)'
-  };
-
-  // Drag transform for the card
-  const cardTransform = useMemo(() => {
-    if (expanded) return 'translate3d(0,0,0)';
-    const dx = drag.dx;
-    const dy = drag.dy;
-    const rot = Math.max(-12, Math.min(12, dx / 18));
-    return `translate3d(${dx}px, ${dy * 0.15}px, 0) rotate(${rot}deg)`;
-  }, [drag, expanded]);
-
-  const likeOpacity = useMemo(() => {
-    if (expanded) return 0;
-    return Math.max(0, Math.min(1, (drag.dx - 24) / 90));
-  }, [drag.dx, expanded]);
-
-  const passOpacity = useMemo(() => {
-    if (expanded) return 0;
-    return Math.max(0, Math.min(1, (-drag.dx - 24) / 90));
-  }, [drag.dx, expanded]);
-
-  const upHintOpacity = useMemo(() => {
-    if (expanded) return 0;
-    const dy = -drag.dy;
-    return Math.max(0, Math.min(1, (dy - 10) / 80));
-  }, [drag.dy, expanded]);
-
-  return (
-    <div style={page}>
-      <div style={header}>
-        <div style={titleWrap}>
-          <button
-            aria-label="Menu"
-            title="Menu"
-            onClick={() => {
-              // simple toggle: relies on CSS in globals for burger drawer if present
-              const el = document.getElementById('ff-burger');
-              if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
-            }}
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 12,
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.06)',
-              color: 'rgba(255,255,255,0.92)',
-              cursor: 'pointer'
-            }}
-          >
-            ☰
-          </button>
-
-          <img src="/frugalfetishes.png" alt="FrugalFetishes" style={brandImg} onError={(e) => {
-            (e.currentTarget as HTMLImageElement).style.display = 'none';
-          }} />
-          <div style={{ minWidth: 0 }}>
-            <p style={title}>Discover</p>
-            <p style={subtitle}>{loading ? 'Loading…' : current ? 'Swipe left/right · swipe up for profile' : 'No profiles'}</p>
+  if (!top)
+    return (
+      <div style={{ padding: 18 }}>
+        <h1 style={{ margin: "8px 0 6px" }}>Discover</h1>
+        <div className="panel" style={{ padding: 16 }}>
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>No more profiles available</div>
+          <div style={{ opacity: 0.85, lineHeight: 1.5 }}>
+            Your backend returned an empty deck from <code>/api/feed</code>, or you already swiped through everything.
           </div>
-        </div>
-
-        <div id="ff-burger" style={{
-          display: 'none',
-          position: 'absolute',
-          top: 46,
-          left: 0,
-          background: 'rgba(15, 8, 24, 0.92)',
-          border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 14,
-          padding: 10,
-          backdropFilter: 'blur(14px)',
-          WebkitBackdropFilter: 'blur(14px)',
-          boxShadow: '0 18px 50px rgba(0,0,0,0.45)',
-          minWidth: 180,
-          zIndex: 20
-        }}>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <button onClick={() => loadFeed()} style={{ ...chip, cursor: 'pointer', textAlign: 'left' }}>Refresh feed</button>
-            <Link href="/matches" style={{ ...chip, textDecoration: 'none' }}>Matches</Link>
-            <button
-              onClick={() => {
-                // logout
-                try { localStorage.removeItem('ff_session'); } catch {}
-                router.push('/login');
-              }}
-              style={{ ...chip, cursor: 'pointer', textAlign: 'left' }}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => loadFeed()} style={{ ...chip, cursor: 'pointer' }}>Refresh</button>
-          <Link href="/matches" style={{ ...chip, textDecoration: 'none' }}>Matches</Link>
         </div>
       </div>
+    );
 
-      {toast ? (
-        <div style={{
-          maxWidth: 980,
-          margin: '0 auto 14px',
-          padding: '10px 12px',
-          borderRadius: 14,
-          border: '1px solid rgba(255,255,255,0.12)',
-          background: 'rgba(15, 8, 24, 0.75)',
-          color: 'rgba(255,255,255,0.85)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)'
-        }}>
-          {toast}
-        </div>
-      ) : null}
-
-      <div style={cardWrap}>
-        {!current ? (
-          <div style={{
-            height: 560,
-            borderRadius: 22,
-            border: '1px solid rgba(255,255,255,0.10)',
-            background: 'rgba(255,255,255,0.04)',
-            display: 'grid',
-            placeItems: 'center',
-            color: 'rgba(255,255,255,0.75)',
-            textAlign: 'center',
-            padding: 18
-          }}>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>No more profiles</div>
-              <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 14 }}>
-                Hit Refresh to check again.
-              </div>
-              <button onClick={() => loadFeed()} style={{ ...chip, cursor: 'pointer' }}>Refresh feed</button>
-            </div>
-          </div>
-        ) : (
+  return (
+    <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
+      <div style={{ width: "min(520px, 92vw)" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+          <h1 style={{ margin: 0 }}>Discover</h1>
           <div
-            style={{ ...card, transform: cardTransform, transition: startRef.current ? 'none' : 'transform 180ms ease' }}
+            className="panel"
+            style={{
+              padding: "6px 10px",
+              borderRadius: 999,
+              fontSize: 13,
+              opacity: 0.95,
+              maxWidth: "60%",
+              textAlign: "right",
+            }}
+          >
+            {status || "Ready"}
+          </div>
+        </div>
+
+        <div style={{ position: "relative", height: 560 }}>
+          {/* Peek next card */}
+          {profiles[idx + 1] && (
+            <div
+              className="panel"
+              style={{
+                position: "absolute",
+                inset: 0,
+                transform: "scale(0.985) translateY(10px)",
+                opacity: 0.45,
+              }}
+            />
+          )}
+
+          {/* Active card */}
+          <div
+            className="panel"
+            style={{
+              position: "absolute",
+              inset: 0,
+              overflow: "hidden",
+              transform,
+              transition: dragging.current ? "none" : "transform 180ms ease",
+              touchAction: "pan-y",
+              userSelect: "none",
+              cursor: sheetOpen ? "default" : "grab",
+            }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
           >
-            <img
-              src={currentPhoto ?? placeholderAvatarDataUri(current.name)}
-              alt={`${current.name || 'Profile'} photo`}
-              style={imgStyle}
-              onError={(e) => {
-                const img = e.currentTarget as HTMLImageElement;
-                img.src = placeholderAvatarDataUri(current.name);
+            {/* Photo / background */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  photo
+                    ? `url(${photo}) center/cover no-repeat`
+                    : "radial-gradient(900px 520px at 20% 30%, rgba(255,79,174,.22), transparent 55%), radial-gradient(900px 700px at 80% 20%, rgba(127,63,245,.18), transparent 60%), rgba(255,255,255,.06)",
               }}
             />
-            <div style={gradientOverlay} />
 
-            {/* LIKE / PASS overlays */}
-            <div style={{ ...overlayLabel, opacity: likeOpacity, right: 22, left: 'auto', background: 'rgba(255,64,160,0.18)' }}>
-              Like
-            </div>
-            <div style={{ ...overlayLabel, opacity: passOpacity, background: 'rgba(255,255,255,0.08)' }}>
-              Pass
-            </div>
-            <div style={{ ...overlayLabel, opacity: upHintOpacity, left: '50%', transform: 'translateX(-50%)', background: 'rgba(120,70,255,0.16)' }}>
-              Profile
-            </div>
+            {/* Gradient overlay */}
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                background:
+                  "linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,.18) 45%, rgba(0,0,0,.05))",
+              }}
+            />
 
-            <div style={namePlate}>
-              <div style={nameLine}>
-                <div style={nameText}>
-                  {current.name || 'User'}
-                  {typeof current.age === 'number' ? `, ${current.age}` : ''}
-                </div>
-                <div style={small}>{current.city || ''}</div>
+            {/* LIKE/PASS overlay */}
+            {overlay && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 18,
+                  left: overlay === "LIKE" ? 18 : "auto",
+                  right: overlay === "PASS" ? 18 : "auto",
+                  padding: "10px 14px",
+                  borderRadius: 16,
+                  fontWeight: 950,
+                  letterSpacing: 2,
+                  border: "1px solid rgba(255,255,255,.18)",
+                  background: overlay === "LIKE" ? "rgba(255,79,174,.22)" : "rgba(255,255,255,.06)",
+                  backdropFilter: "blur(10px)",
+                }}
+              >
+                {overlay}
               </div>
-              <div style={{ ...small, opacity: 0.86, maxWidth: 360 }}>
-                {current.bio ? current.bio.slice(0, 84) + (current.bio.length > 84 ? '…' : '') : 'Swipe up to see the full profile.'}
+            )}
+
+            <div style={{ position: "absolute", left: 16, right: 16, bottom: 14 }}>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>
+                {top.name || "Unknown"}
+                {typeof top.age === "number" ? `, ${top.age}` : ""}
               </div>
-            </div>
+              <div style={{ opacity: 0.85, fontSize: 13, marginTop: 2 }}>{top.city || ""}</div>
 
-            <div style={actions}>
-              <button aria-label="Pass" title="Pass" disabled={busy} onClick={() => sendDecision('pass')} style={iconBtn('pass')}>
-                ✕
-              </button>
-
-              <Link aria-label="View" title="View" href={`/matches/${encodeURIComponent(current.id)}`} style={iconBtn('view')}>
-                👁
-              </Link>
-
-              <button aria-label="Like" title="Like" disabled={busy} onClick={() => sendDecision('like')} style={iconBtn('like')}>
-                ♥
-              </button>
-            </div>
-
-            {/* bottom sheet (expanded profile) */}
-            <div style={sheet}>
-              <div style={sheetHandle} />
-              <div style={sheetTitle}>
-                <h2 style={sheetName}>
-                  {current.name || 'User'} {typeof current.age === 'number' ? `· ${current.age}` : ''}
-                </h2>
-                <div style={{ ...small, opacity: 0.8 }}>{current.city || ''}</div>
-              </div>
-
-              <div style={{ ...small, opacity: 0.9, lineHeight: 1.4 }}>
-                {current.bio || 'No bio yet.'}
+              <div className="actionRow" style={{ marginTop: 12 }}>
+                <button className="actionIcon" aria-label="Pass" onClick={() => void pass()} title="Pass">
+                  ✕
+                </button>
+                <button className="actionIcon primary" aria-label="View profile" onClick={() => setSheetOpen(true)} title="View profile">
+                  👁
+                </button>
+                <button className="actionIcon primary" aria-label="Like" onClick={() => void like()} title="Like">
+                  ♥
+                </button>
               </div>
 
-              {Array.isArray(current.interests) && current.interests.length ? (
-                <div style={chipRow}>
-                  {current.interests.slice(0, 10).map((t) => (
-                    <span key={t} style={chip}>{t}</span>
-                  ))}
-                </div>
-              ) : null}
-
-              <div style={{ marginTop: 12, ...small, opacity: 0.7 }}>
-                Swipe down to return to Discover.
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.78, textAlign: "center" }}>
+                Swipe left=pass • right=like • up=view profile
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
 
-      <div style={{ maxWidth: 980, margin: '14px auto 0', opacity: 0.65, color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center' }}>
-        Tip: Swipe right = Like · Swipe left = Pass · Swipe up = Profile · Swipe down (in profile) = Back
+        {/* Bottom sheet */}
+        {sheetOpen && (
+          <div className="menuOverlay" role="dialog" aria-modal="true">
+            <button className="overlayBackdrop" aria-label="Close profile" onClick={() => setSheetOpen(false)} />
+            <aside
+              className="menuPanel"
+              style={{
+                left: "50%",
+                transform: "translateX(-50%)",
+                top: "auto",
+                bottom: 10,
+                width: "min(560px, calc(100% - 20px))",
+              }}
+              onPointerDown={onSheetPointerDown}
+              onPointerMove={onSheetPointerMove}
+              onPointerUp={onSheetPointerUp}
+              onPointerCancel={onSheetPointerUp}
+            >
+              <div className="menuHeader">
+                <div className="menuTitle">Profile</div>
+                <button className="iconBtn" aria-label="Close" onClick={() => setSheetOpen(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <div style={{ padding: "12px 6px", display: "grid", gap: 10 }}>
+                <div style={{ fontSize: 20, fontWeight: 950 }}>
+                  {top.name || "Unknown"} {typeof top.age === "number" ? `• ${top.age}` : ""}
+                </div>
+                {top.city && <div style={{ opacity: 0.85 }}>{top.city}</div>}
+                {top.bio && <div style={{ opacity: 0.85, lineHeight: 1.5 }}>{top.bio}</div>}
+                <div style={{ opacity: 0.75, fontSize: 12 }}>Swipe down to return to Discover.</div>
+              </div>
+
+              <div className="menuFooter" style={{ display: "flex", gap: 10 }}>
+                <button className="pillBtn" onClick={() => setSheetOpen(false)}>
+                  Back
+                </button>
+                <button className="pillBtn danger" onClick={() => (setSheetOpen(false), void pass())}>
+                  Pass
+                </button>
+                <button className="pillBtn" onClick={() => (setSheetOpen(false), void like())}>
+                  Like
+                </button>
+              </div>
+            </aside>
+          </div>
+        )}
       </div>
     </div>
   );
