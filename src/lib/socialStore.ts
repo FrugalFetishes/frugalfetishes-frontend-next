@@ -21,6 +21,22 @@ export type Message = {
   createdAt: number;      // ms epoch
 };
 
+
+export type UserProfileSnapshot = {
+  uid: string;
+  name?: string;
+  age?: number;
+  city?: string;
+
+  photoUrl?: string;
+  profilePhotoUrl?: string;
+  imageUrl?: string;
+  avatarUrl?: string;
+
+  // allow future expansion without fighting types
+  [key: string]: unknown;
+};
+
 type SeenState = {
   likesGiven: Record<string, string[]>;  // uid -> [targetUid]
   likesReceived: Record<string, string[]>; // uid -> [fromUid]
@@ -34,8 +50,6 @@ type SeenState = {
 const KEY = "ff_social_v1";
 
 const UID_KEY = "ff_user_id_v1";
-const TOKEN_FP_KEY = "ff_user_token_fp_v1";
-
 function getStoredUid(): string | null {
   if (!isBrowser()) return null;
   try {
@@ -45,23 +59,12 @@ function getStoredUid(): string | null {
   }
 }
 
-function setStoredUid(uid: string, token: string) {
+function setStoredUid(uid: string) {
   if (!isBrowser()) return;
   try {
     localStorage.setItem(UID_KEY, uid);
-    localStorage.setItem(TOKEN_FP_KEY, token.slice(0, 16));
   } catch {}
-}
-
-function shouldReplaceStoredUid(token: string): boolean {
-  if (!isBrowser()) return false;
-  try {
-    const fp = localStorage.getItem(TOKEN_FP_KEY) || "";
-    const next = token.slice(0, 16);
-    return fp !== "" && fp !== next;
-  } catch {
-    return false;
-  }
+} catch {}
 }
 
 
@@ -119,23 +122,16 @@ export function uidFromSessionToken(token: string | null): string | null {
   } catch {}
 
   if (decodedUid) {
-    if (!stored || stored !== decodedUid) setStoredUid(decodedUid, token);
+    if (!stored || stored !== decodedUid) setStoredUid(decodedUid);
     return decodedUid;
   }
 
   // Non-JWT token: fallback to token-derived uid, but persist it so it remains stable.
   const fallback = "tok_" + token.slice(0, 12);
   if (!stored) {
-    setStoredUid(fallback, token);
+    setStoredUid(fallback);
     return fallback;
   }
-
-  // If token fingerprint changes, assume session switched; update stored uid to the new fallback.
-  if (shouldReplaceStoredUid(token)) {
-    setStoredUid(fallback, token);
-    return fallback;
-  }
-
   return stored;
 }
 
@@ -318,7 +314,12 @@ export function clearUnreadForChat(uid: string, matchId: string) {
 }
 
 // Extra compat: placeholder snapshot loader (wired later to real profiles)
-export function loadUserProfileSnapshot(_uid: string) {
-  // For now, return null. UI should handle missing snapshot.
-  return null;
+export function loadUserProfileSnapshot(uid: string): UserProfileSnapshot | null {
+  // Local-first: we don't have a full remote profile DB yet.
+  // Return a minimal snapshot based on locally-edited extras when available.
+  if (!uid) return null;
+  const snap: UserProfileSnapshot = { uid };
+  // extras are stored separately; UI reads them via getProfileExtras already.
+  // Keeping this function typed prevents Next build from inferring `never`.
+  return snap;
 }
