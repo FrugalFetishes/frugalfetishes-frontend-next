@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import AppHeader from '@/components/AppHeader';
 import { apiGet, apiPost } from '@/lib/api';
-import { requireSession } from '@/lib/session';
-import { uidFromToken, like } from '@/lib/socialStore';
-import AppHeader from "@/components/AppHeader";
+import { requireSession, clearSession } from '@/lib/session';
 
 type Profile = {
   id: string;
@@ -114,11 +114,6 @@ function placeholderAvatarDataUri(name: string) {
 type SwipeLabel = 'like' | 'pass' | null;
 
 export default function DiscoverPage() {
-  const token = useMemo(() => {
-    try { return requireSession(); } catch { return null as any; }
-  }, []);
-  const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
-
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<string>('');
@@ -127,14 +122,41 @@ export default function DiscoverPage() {
   const [busy, setBusy] = useState(false);
   const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
 
-  // UI expects `loading` for the card stack; our state flag is `busy`.
-  const loading = busy;
-
   const drag = useRef({ active: false, x0: 0, y0: 0, dx: 0, dy: 0 });
   const [dragXY, setDragXY] = useState({ x: 0, y: 0 });
 
   const current = profiles[idx] || null;
   const currentPhoto = current ? pickPhotoUrl(current) : null;
+
+  const pillBtn: React.CSSProperties = {
+    height: 36,
+    padding: '0 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(255,255,255,0.06)',
+    color: 'rgba(255,255,255,0.92)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    cursor: 'pointer',
+    fontSize: 13,
+    lineHeight: '36px',
+    userSelect: 'none',
+  };
+
+  const iconBtn: React.CSSProperties = {
+    width: 42,
+    height: 42,
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(255,255,255,0.08)',
+    color: 'rgba(255,255,255,0.94)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    userSelect: 'none',
+  };
 
   async function fetchFeed() {
     setBusy(true);
@@ -259,17 +281,7 @@ export default function DiscoverPage() {
 
   function decide(decision: 'like' | 'pass') {
     if (!current) return;
-    if (decision === 'like') {
-      try {
-        const res = like(current.id, uid);
-        if (res.matched) {
-          // optional: quick hint; keeps UI simple
-          console.log('Matched!', res.matchId);
-        }
-      } catch (e) {
-        console.warn('like() failed', e);
-      }
-    }
+    if (decision === 'like') persistLocalMatch(current);
     void sendDecision(decision, current.id);
     nextCard();
   }
@@ -364,6 +376,12 @@ export default function DiscoverPage() {
     color: 'white',
   };
 
+  const stageStyle: React.CSSProperties = {
+    maxWidth: 980,
+    margin: '0 auto',
+    padding: '16px',
+  };
+
   const cardWrap: React.CSSProperties = {
     display: 'grid',
     placeItems: 'center',
@@ -387,23 +405,49 @@ export default function DiscoverPage() {
     touchAction: 'none',
   };
 
-  const cardBottomStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginTop: 12,
+  const bottomFade: React.CSSProperties = {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '44%',
+    background: 'linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.76))',
   };
 
-  const photoStyle: React.CSSProperties = {
+  const infoStyle: React.CSSProperties = {
     position: 'absolute',
-    inset: 0,
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    borderRadius: 28,
-    userSelect: 'none',
-    pointerEvents: 'none',
+    left: 16,
+    right: 16,
+    bottom: 14,
+    display: 'grid',
+    gap: 6,
+    zIndex: 2,
+  };
+
+  const nameStyle: React.CSSProperties = { fontSize: 22, fontWeight: 800, letterSpacing: 0.2 };
+
+  const badge: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.85)',
+  };
+
+  const actionRow: React.CSSProperties = {
+    position: 'absolute',
+    right: 14,
+    bottom: 14,
+    display: 'flex',
+    gap: 10,
+    zIndex: 3,
+  };
+
+  const miniHint: React.CSSProperties = {
+    marginTop: 12,
+    opacity: 0.78,
+    fontSize: 12,
+    textAlign: 'center',
   };
 
   const overlayPill: React.CSSProperties = {
@@ -420,77 +464,201 @@ export default function DiscoverPage() {
     textTransform: 'uppercase',
   };
 
+  const expandedSheet: React.CSSProperties = {
+    position: 'fixed',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '70vh',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    background: 'rgba(12, 6, 20, 0.90)',
+    backdropFilter: 'blur(14px)',
+    borderTop: '1px solid rgba(255,255,255,0.12)',
+    boxShadow: '0 -20px 60px rgba(0,0,0,0.55)',
+    zIndex: 50,
+    transform: expanded ? 'translateY(0)' : 'translateY(100%)',
+    transition: 'transform 200ms ease',
+    padding: 18,
+    overflow: 'auto',
+  };
+
+  const expandedHandle: React.CSSProperties = {
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    background: 'rgba(255,255,255,0.22)',
+    margin: '2px auto 12px',
+  };
+
+  const topToast: React.CSSProperties = {
+    position: 'fixed',
+    top: 70,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: 'min(760px, 92vw)',
+    padding: '10px 12px',
+    borderRadius: 14,
+    background: 'rgba(0,0,0,0.52)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    backdropFilter: 'blur(10px)',
+    color: 'rgba(255,255,255,0.90)',
+    fontSize: 13,
+    zIndex: 60,
+  };
+
   return (
-    <div className="ff-page">
+    <div style={containerStyle}>
       <AppHeader active="discover" />
 
-      <main className="ff-shell">
-        <div style={containerStyle}>
-          {/* Card stack */}
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <div style={cardWrap}>
-              {loading ? (
-                <div style={{ opacity: 0.9, padding: 18 }}>Loading…</div>
-              ) : current ? (
-                <div style={cardStyle}>
-                  {swipeLabel ? (
-                    <div
-                      style={{
-                        ...overlayPill,
-                        borderColor:
-                          swipeLabel === 'like'
-                            ? 'rgba(98, 255, 176, 0.95)'
-                            : 'rgba(255, 98, 118, 0.95)',
-                        color:
-                          swipeLabel === 'like'
-                            ? 'rgba(98, 255, 176, 0.95)'
-                            : 'rgba(255, 98, 118, 0.95)',
-                        transform: swipeLabel === 'like' ? 'rotate(-12deg)' : 'rotate(12deg)',
-                      }}
-                    >
-                      {swipeLabel === 'like' ? 'LIKE' : 'PASS'}
-                    </div>
-                  ) : null}
+      {/* Debug controls (temporary) */}
+      <div style={{ padding: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button type="button" style={pillBtn} onClick={resetDeck}>
+          ↺ Reset deck
+        </button>
+        <button type="button" style={pillBtn} onClick={() => void fetchFeed()} disabled={busy}>
+          ⟳ Refresh
+        </button>
+        <Link href="/matches" style={{ ...pillBtn, textDecoration: 'none' }}>
+          💬 Matches
+        </Link>
+      </div>
+      </div>
 
-                  {!currentPhoto ? (
-                    <img
-                      src={placeholderAvatarDataUri(current.name)}
-                      alt={current.name || 'Profile'}
-                      style={photoStyle}
-                      draggable={false}
-                    />
-                  ) : (
-                    <img src={currentPhoto} alt={current.name || 'Profile'} style={photoStyle} draggable={false} />
-                  )}
+      {status ? <div style={topToast}>{status}</div> : null}
 
-                  <div style={cardBottomStyle}>
-                    <div style={{ fontWeight: 800, fontSize: 20 }}>
-                      {current.name || 'Someone'}
-                      {typeof current.age === 'number' ? `, ${current.age}` : ''}
-                    </div>
-                    <div style={{ opacity: 0.8, fontSize: 13 }}>{current.city || ''}</div>
-
-                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                      <button type="button" style={btnPass} onClick={() => doSwipe('pass')} disabled={busy}>
-                        ✕
-                      </button>
-                      <button type="button" style={btnLike} onClick={() => doSwipe('like')} disabled={busy}>
-                        ♥
-                      </button>
-                    </div>
-
-                    <div style={{ marginTop: 10, opacity: 0.7, fontSize: 12 }}>
-                      Swipe left/right or use buttons. Swipe up to view profile.
-                    </div>
-                  </div>
+      <div style={stageStyle}>
+        <div style={cardWrap}>
+          {current ? (
+            <div
+              style={cardStyle}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
+            >
+              {swipeLabel ? (
+                <div
+                  style={{
+                    ...overlayPill,
+                    borderColor: swipeLabel === 'like' ? 'rgba(98, 255, 176, 0.95)' : 'rgba(255, 98, 118, 0.95)',
+                    color: swipeLabel === 'like' ? 'rgba(98, 255, 176, 0.95)' : 'rgba(255, 98, 118, 0.95)',
+                    transform: swipeLabel === 'like' ? 'rotate(-12deg)' : 'rotate(12deg)',
+                  }}
+                >
+                  {swipeLabel === 'like' ? 'LIKE' : 'PASS'}
                 </div>
-              ) : (
-                <div style={{ opacity: 0.9, padding: 18 }}>No profiles to show.</div>
-              )}
+              ) : null}
+
+              {!currentPhoto ? (
+                <img
+                  src={placeholderAvatarDataUri(current.name)}
+                  alt={`${current.name}'s photo`}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9 }}
+                />
+              ) : null}
+
+              <div style={bottomFade} />
+
+              <div style={infoStyle}>
+                <div style={nameStyle}>
+                  {current.name}
+                  {typeof current.age === 'number' ? `, ${current.age}` : ''}
+                </div>
+                <div style={badge}>
+                  <span style={{ opacity: 0.9 }}>{current.city || '—'}</span>
+                </div>
+                <div style={{ opacity: 0.85, fontSize: 13 }}>
+                  {current.bio ? current.bio : 'Swipe left/right, or swipe up to view profile.'}
+                </div>
+              </div>
+
+              <div style={actionRow}>
+                <button type="button" aria-label="Pass" style={{ ...iconBtn, background: 'rgba(255, 98, 118, 0.14)' }} onClick={() => decide('pass')}>
+                  ✕
+                </button>
+                <button type="button" aria-label="View" style={{ ...iconBtn, background: 'rgba(255,255,255,0.10)' }} onClick={() => setExpanded(true)}>
+                  ⌃
+                </button>
+                <button type="button" aria-label="Like" style={{ ...iconBtn, background: 'rgba(98, 255, 176, 0.14)' }} onClick={() => decide('like')}>
+                  ♥
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                width: 'min(520px, 94vw)',
+                borderRadius: 22,
+                border: '1px solid rgba(255,255,255,0.10)',
+                background: 'rgba(255,255,255,0.04)',
+                padding: 18,
+              }}
+            >
+              <div style={{ fontWeight: 800, fontSize: 18 }}>No more profiles available</div>
+              <div style={{ opacity: 0.85, marginTop: 8, fontSize: 13 }}>
+                Your backend returned an empty deck from <code>/api/feed</code>, or you already swiped through everything.
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button type="button" style={pillBtn} onClick={resetDeck}>
+                  ↺ Reset deck
+                </button>
+                <button type="button" style={pillBtn} onClick={() => void fetchFeed()} disabled={busy}>
+                  ⟳ Refresh
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={miniHint}>Swipe left = Pass · Swipe right = Like · Swipe up = Expand · Swipe down = Close</div>
+      </div>
+
+      <div
+        style={expandedSheet}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        <div style={expandedHandle} />
+        {current ? (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>
+                {current.name}
+                {typeof current.age === 'number' ? `, ${current.age}` : ''}
+              </div>
+              <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
+                ↓ Back
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{current.bio || 'No bio yet.'}</div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>City</div>
+                <div style={{ opacity: 0.92 }}>{current.city || '—'}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+              <button type="button" style={{ ...pillBtn, background: 'rgba(255, 98, 118, 0.12)' }} onClick={() => decide('pass')}>
+                ✕ Pass
+              </button>
+              <button type="button" style={{ ...pillBtn, background: 'rgba(98, 255, 176, 0.12)' }} onClick={() => decide('like')}>
+                ♥ Like
+              </button>
             </div>
           </div>
-        </div>
-      </main>
+        ) : (
+          <div style={{ opacity: 0.85 }}>No profile selected.</div>
+        )}
+      </div>
     </div>
   );
 }
