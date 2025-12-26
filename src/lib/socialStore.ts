@@ -283,7 +283,7 @@ export function addChatMessage(matchId: string, a: any, b?: any, c?: any): Messa
 }
 
 
-export export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
+export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
   const s = load();
   if (!s.unreadByUser[uid]) s.unreadByUser[uid] = {};
   s.unreadByUser[uid][matchId] = (s.unreadByUser[uid][matchId] || 0) + amount;
