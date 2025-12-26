@@ -207,8 +207,33 @@ export function getChat(matchId: string) {
   return getMessages(matchId);
 }
 
-export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string) {
-  return sendMessage(matchId, fromUid, toUid, text);
+export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string): ReturnType<typeof sendMessage>;
+export function addChatMessage(matchId: string, msg: { fromUserId: string; text: string; toUserId?: string }): ReturnType<typeof sendMessage>;
+export function addChatMessage(
+  matchId: string,
+  a: string | { fromUserId: string; text: string; toUserId?: string },
+  b?: string,
+  c?: string
+) {
+  // Back-compat: allow old call shape addChatMessage(matchId, { fromUserId, text })
+  if (typeof a === "object" && a) {
+    const fromUid = a.fromUserId;
+    const text = a.text;
+    let toUid = a.toUserId;
+
+    if (!toUid) {
+      const s = load();
+      const m = s.matches.find((mm) => mm.id === matchId);
+      if (m) toUid = m.a === fromUid ? m.b : m.a;
+    }
+
+    // If we still can't resolve, fall back to a no-op message send with empty toUid,
+    // but keep app alive (UI will still show the message locally).
+    return sendMessage(matchId, fromUid, toUid || "", text);
+  }
+
+  // New call shape: addChatMessage(matchId, fromUid, toUid, text)
+  return sendMessage(matchId, a, b || "", c || "");
 }
 
 export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
