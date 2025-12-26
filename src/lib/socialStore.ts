@@ -1,54 +1,29 @@
-'use client';
+"use client";
 
-export type ProfileSummary = {
+type Decision = "like" | "pass";
+export type MatchSummary = {
+  matchId: string;
+  otherUserId: string;
+  createdAt: number;
+};
+
+export type ChatMessage = {
   id: string;
-  name: string;
-  age?: number;
-  city?: string;
-  photoUrl?: string;
+  fromUserId: string;
+  text: string;
+  ts: number;
 };
 
-export type Match = {
-  id: string;          // other user's id/key
-  name: string;
-  age?: number;
-  city?: string;
-  photoUrl?: string;
-  matchedAt: number;   // epoch ms
-};
+const KEY_PREFIX = "ff_";
+const NEW_MATCH_KEY = (uid: string) => `${KEY_PREFIX}newmatches:${uid}`; // JSON string[]
+const UNREAD_KEY = (uid: string) => `${KEY_PREFIX}unread:${uid}`; // JSON Record<chatId, number>
+const MATCH_KEY = (matchId: string) => `${KEY_PREFIX}match:${matchId}`; // JSON {a,b,createdAt}
+const CHAT_KEY = (matchId: string) => `${KEY_PREFIX}chat:${matchId}`; // JSON ChatMessage[]
+const LIKE_KEY = (fromUid: string, toUid: string) => `${KEY_PREFIX}like:${fromUid}:${toUid}`; // "1"
+const PROFILE_KEY = (uid: string) => `${KEY_PREFIX}profile:${uid}`; // JSON partial profile overrides (headline/about/zip)
 
-const EMAIL_KEY = 'ff_email';
-const LEGACY_MATCHES_KEY = 'ff_matches_v1'; // previous single-key storage (migration)
-const LEGACY_LIKES_KEY = 'ff_likes_v1';
-
-function safeNow() {
-  return Date.now();
-}
-
-function norm(s: string) {
-  return (s || '').trim().toLowerCase();
-}
-
-function kLikes(userKey: string) {
-  return `ff_likes_v2:${norm(userKey)}`;
-}
-function kPasses(userKey: string) {
-  return `ff_passes_v2:${norm(userKey)}`;
-}
-function kMatches(userKey: string) {
-  return `ff_matches_v2:${norm(userKey)}`;
-}
-function kUnseenMatches(userKey: string) {
-  return `ff_unseen_matches_v2:${norm(userKey)}`;
-}
-function kProfileCache() {
-  return `ff_profile_cache_v2`;
-}
-
-function readJSON<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
+function safeJsonParse<T>(raw: string | null, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -56,150 +31,157 @@ function readJSON<T>(key: string, fallback: T): T {
   }
 }
 
-function writeJSON(key: string, value: any) {
-  if (typeof window === 'undefined') return;
+export function uidFromToken(token: string | null | undefined): string | null {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-export function setCurrentUserEmail(email: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(EMAIL_KEY, (email || '').trim());
-  } catch {}
-}
-
-export function getCurrentUserKey(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const e = localStorage.getItem(EMAIL_KEY);
-    if (e && e.trim()) return e.trim();
-  } catch {}
-  return null;
-}
-
-function cacheProfile(p: ProfileSummary) {
-  if (!p?.id) return;
-  const key = kProfileCache();
-  const cache = readJSON<Record<string, ProfileSummary>>(key, {});
-  cache[p.id] = { ...cache[p.id], ...p };
-  writeJSON(key, cache);
-}
-
-export function getCachedProfile(id: string): ProfileSummary | null {
-  if (!id) return null;
-  const cache = readJSON<Record<string, ProfileSummary>>(kProfileCache(), {});
-  return cache[id] ?? null;
-}
-
-function migrateLegacyIfNeeded(userKey: string) {
-  // If legacy single-key likes/matches exist, copy them into user-scoped keys once.
-  const markerKey = `ff_migrated_v2:${norm(userKey)}`;
-  const already = readJSON<boolean>(markerKey, false);
-  if (already) return;
-
-  const legacyMatches = readJSON<Match[]>(LEGACY_MATCHES_KEY, []);
-  const legacyLikes = readJSON<string[]>(LEGACY_LIKES_KEY, []);
-  if (legacyMatches.length) writeJSON(kMatches(userKey), legacyMatches);
-  if (legacyLikes.length) writeJSON(kLikes(userKey), legacyLikes);
-
-  writeJSON(markerKey, true);
-}
-
-export function getUnseenMatchesCount(userKey: string | null): number {
-  if (!userKey) return 0;
-  migrateLegacyIfNeeded(userKey);
-  return readJSON<number>(kUnseenMatches(userKey), 0);
-}
-
-export function markAllMatchesSeen(userKey: string | null) {
-  if (!userKey) return;
-  migrateLegacyIfNeeded(userKey);
-  writeJSON(kUnseenMatches(userKey), 0);
-}
-
-export function getMatches(userKey: string | null): Match[] {
-  if (!userKey) return [];
-  migrateLegacyIfNeeded(userKey);
-  const list = readJSON<Match[]>(kMatches(userKey), []);
-  // newest first
-  return [...list].sort((a, b) => (b.matchedAt || 0) - (a.matchedAt || 0));
-}
-
-function addToSet(key: string, value: string) {
-  const list = readJSON<string[]>(key, []);
-  const v = value;
-  if (!v) return;
-  if (!list.includes(v)) {
-    list.push(v);
-    writeJSON(key, list);
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(b64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    const payload = JSON.parse(json) as any;
+    return (
+      payload?.uid ||
+      payload?.user_id ||
+      payload?.sub ||
+      payload?.id ||
+      payload?.firebase?.identities?.email?.[0] ||
+      null
+    );
+  } catch {
+    return null;
   }
 }
 
-function hasInSet(key: string, value: string): boolean {
-  const list = readJSON<string[]>(key, []);
-  return value ? list.includes(value) : false;
+function matchIdFor(a: string, b: string): string {
+  return [a, b].sort().join("__");
 }
 
-function upsertMatch(userKey: string, other: ProfileSummary) {
-  const mk = kMatches(userKey);
-  const list = readJSON<Match[]>(mk, []);
-  const existing = list.find((m) => m.id === other.id);
-  if (existing) return; // don't duplicate
-  const newMatch: Match = {
-    id: other.id,
-    name: other.name || 'Match',
-    age: other.age,
-    city: other.city,
-    photoUrl: other.photoUrl,
-    matchedAt: safeNow(),
-  };
-  list.push(newMatch);
-  writeJSON(mk, list);
-}
+export function recordDecisionLocal(fromUid: string, toUid: string, decision: Decision) {
+  if (!fromUid || !toUid) return { matched: false as const, matchId: null as string | null };
 
-function bumpUnseen(userKey: string, amount: number) {
-  const uk = kUnseenMatches(userKey);
-  const cur = readJSON<number>(uk, 0);
-  const next = Math.max(0, (cur || 0) + amount);
-  writeJSON(uk, next);
-}
+  if (decision === "like") {
+    localStorage.setItem(LIKE_KEY(fromUid, toUid), "1");
 
-export function recordDecisionAndMaybeMatch(args: {
-  currentUserKey: string;
-  currentUserId: string;         // identifier shown to others (usually email)
-  target: ProfileSummary;
-  decision: 'like' | 'pass';
-}): { matched: boolean } {
-  const { currentUserKey, currentUserId, target, decision } = args;
-  if (!currentUserKey || !currentUserId || !target?.id) return { matched: false };
-
-  migrateLegacyIfNeeded(currentUserKey);
-  cacheProfile(target);
-
-  if (decision === 'pass') {
-    addToSet(kPasses(currentUserKey), target.id);
-    return { matched: false };
+    // Mutual like?
+    const mutual = localStorage.getItem(LIKE_KEY(toUid, fromUid)) === "1";
+    if (mutual) {
+      const matchId = matchIdFor(fromUid, toUid);
+      const existing = localStorage.getItem(MATCH_KEY(matchId));
+      if (!existing) {
+        localStorage.setItem(
+          MATCH_KEY(matchId),
+          JSON.stringify({ a: fromUid, b: toUid, createdAt: Date.now() })
+        );
+        // mark as "new match" for both users
+        addNewMatchFor(fromUid, matchId);
+        addNewMatchFor(toUid, matchId);
+      }
+      return { matched: true as const, matchId };
+    }
   }
 
-  // LIKE
-  addToSet(kLikes(currentUserKey), target.id);
+  // pass: no-op locally
+  return { matched: false as const, matchId: null };
+}
 
-  // Mutual like? (target liked current user)
-  const targetUserKey = target.id; // in this app, we treat target.id as their user key (seed emails etc.)
-  // If they are on the same device, we can read their likes list and detect mutual for testing.
-  const mutual = hasInSet(kLikes(targetUserKey), currentUserId);
+function addNewMatchFor(uid: string, matchId: string) {
+  const list = safeJsonParse<string[]>(localStorage.getItem(NEW_MATCH_KEY(uid)), []);
+  if (!list.includes(matchId)) {
+    list.unshift(matchId);
+    localStorage.setItem(NEW_MATCH_KEY(uid), JSON.stringify(list));
+  }
+}
 
-  if (!mutual) return { matched: false };
+export function consumeNewMatches(uid: string): string[] {
+  const list = safeJsonParse<string[]>(localStorage.getItem(NEW_MATCH_KEY(uid)), []);
+  localStorage.setItem(NEW_MATCH_KEY(uid), JSON.stringify([]));
+  return list;
+}
 
-  // Create match for BOTH users
-  const currentSummary: ProfileSummary = { id: currentUserId, name: currentUserId };
-  upsertMatch(currentUserKey, target);
-  upsertMatch(targetUserKey, currentSummary);
+export function getUnreadMap(uid: string): Record<string, number> {
+  return safeJsonParse<Record<string, number>>(localStorage.getItem(UNREAD_KEY(uid)), {});
+}
 
-  bumpUnseen(currentUserKey, 1);
-  bumpUnseen(targetUserKey, 1);
+export function setUnreadCount(uid: string, matchId: string, count: number) {
+  const map = getUnreadMap(uid);
+  if (count <= 0) delete map[matchId];
+  else map[matchId] = count;
+  localStorage.setItem(UNREAD_KEY(uid), JSON.stringify(map));
+}
 
-  return { matched: true };
+export function incrementUnread(uid: string, matchId: string, delta: number) {
+  const map = getUnreadMap(uid);
+  const next = (map[matchId] || 0) + delta;
+  if (next <= 0) delete map[matchId];
+  else map[matchId] = next;
+  localStorage.setItem(UNREAD_KEY(uid), JSON.stringify(map));
+}
+
+export function badgeCounts(uid: string) {
+  const newMatches = safeJsonParse<string[]>(localStorage.getItem(NEW_MATCH_KEY(uid)), []).length;
+  const unread = Object.values(getUnreadMap(uid)).reduce((a, b) => a + b, 0);
+  return { newMatches, unreadMessages: unread };
+}
+
+export function listMatchesFor(uid: string): MatchSummary[] {
+  const out: MatchSummary[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith(`${KEY_PREFIX}match:`)) continue;
+    const matchId = k.substring(`${KEY_PREFIX}match:`.length);
+    const raw = localStorage.getItem(k);
+    const m = safeJsonParse<any>(raw, null);
+    if (!m) continue;
+    if (m.a === uid || m.b === uid) {
+      const other = m.a === uid ? m.b : m.a;
+      out.push({ matchId, otherUserId: other, createdAt: m.createdAt || 0 });
+    }
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt);
+  return out;
+}
+
+export function getChat(matchId: string): ChatMessage[] {
+  return safeJsonParse<ChatMessage[]>(localStorage.getItem(CHAT_KEY(matchId)), []);
+}
+
+export function addChatMessage(matchId: string, msg: Omit<ChatMessage, "id" | "ts">) {
+  const list = getChat(matchId);
+  const next: ChatMessage = { id: crypto.randomUUID(), ts: Date.now(), ...msg };
+  list.push(next);
+  localStorage.setItem(CHAT_KEY(matchId), JSON.stringify(list));
+  return next;
+}
+
+export function clearUnreadForChat(uid: string, matchId: string) {
+  setUnreadCount(uid, matchId, 0);
+}
+
+export function getProfileExtras(uid: string): { headline?: string; about?: string; zip?: string } {
+  return safeJsonParse<any>(localStorage.getItem(PROFILE_KEY(uid)), {});
+}
+
+export function setProfileExtras(uid: string, extras: { headline?: string; about?: string; zip?: string }) {
+  const cur = getProfileExtras(uid);
+  const next = { ...cur, ...extras };
+  localStorage.setItem(PROFILE_KEY(uid), JSON.stringify(next));
+}
+
+
+const USER_PROFILE_KEY = (uid: string) => `${KEY_PREFIX}userprofile:${uid}`; // JSON snapshot
+
+export function saveUserProfileSnapshot(uid: string, profile: any) {
+  if (!uid) return;
+  try {
+    localStorage.setItem(USER_PROFILE_KEY(uid), JSON.stringify(profile));
+  } catch {}
+}
+
+export function loadUserProfileSnapshot(uid: string): any | null {
+  return safeJsonParse<any>(localStorage.getItem(USER_PROFILE_KEY(uid)), null);
 }
