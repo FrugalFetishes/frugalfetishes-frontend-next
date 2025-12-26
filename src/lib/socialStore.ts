@@ -281,6 +281,20 @@ export function sendMessage(matchId: string, fromUid: string, text: string) {
   save(s);
 }
 
+// Back-compat helper used by /chat/[id]/page.tsx
+export function addChatMessage(matchId: string, payload: { fromUserId: string; text: string }) {
+  const fromUid = payload?.fromUserId || "anon";
+  const text = String(payload?.text ?? "").trim();
+  if (!text) return;
+  sendMessage(matchId, fromUid, text);
+}
+
+// Back-compat helper used by /chat/[id]/page.tsx
+export function clearUnreadForChat(uid: string, matchId: string) {
+  if (!uid || !matchId) return;
+  markChatRead(matchId, uid);
+}
+
 export function markChatRead(matchId: string, uid: string) {
   const s = load();
   const msgs = s.chats[matchId] || [];
