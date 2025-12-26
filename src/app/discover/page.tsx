@@ -1,560 +1,675 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { apiGet, apiPost } from "@/lib/api";
-import { requireSession, clearSession } from "@/lib/session";
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+import { apiGet, apiPost } from '@/lib/api';
+import { loadSession } from '@/lib/session';
 
 type Profile = {
   id: string;
-  name: string;
+  name?: string;
   age?: number;
   city?: string;
   bio?: string;
-  photoUrl?: string;
+  interests?: string[];
+  photoUrl?: string | null;
+  photos?: string[] | null;
 };
 
-function normalizePhotoUrl(url?: string): string | null {
-  if (!url) return null;
-  const u = String(url).trim();
-  if (!u) return null;
+type FeedResponse =
+  | { ok: true; profiles: Profile[] }
+  | { ok: true; users: Profile[] }
+  | { ok: true; feed: Profile[] }
+  | { ok: true; data: any }
+  | { ok: false; error?: string }
+  | any;
 
-  // Common bug: people store paths like "/public/foo.png" in data.
-  if (u.startsWith("/public/")) return "/" + u.slice("/public/".length);
-  if (u.startsWith("public/")) return "/" + u.slice("public/".length);
-
-  // Already absolute URL
-  if (/^https?:\/\//i.test(u)) return u;
-
-  // Root-relative
-  if (u.startsWith("/")) return u;
-
-  // Otherwise treat as root-relative file name/path
-  return "/" + u;
+function toText(v: any): string {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  try { return String(v); } catch { return ''; }
 }
 
-function pickPhotoUrl(p: any): string | undefined {
-    const candidates: any[] = [
-      p?.photoUrl,
-      p?.photoURL,
-      p?.photo,
-      p?.avatarUrl,
-      p?.avatarURL,
-      p?.profilePhotoUrl,
-      p?.profilePhotoURL,
-      p?.imageUrl,
-      p?.imageURL,
-      p?.images?.[0],
-      p?.photos?.[0],
-      p?.photoUrls?.[0],
-      p?.photoURLs?.[0],
-      p?.pictures?.[0],
-    ];
-    for (const c of candidates) {
-      const u = normalizePhotoUrl(c);
-      if (u) return u;
-    }
-    return undefined;
+function normalizePhotoUrl(url: any): string | null {
+  const s = toText(url).trim();
+  if (!s) return null;
+  if (s.startsWith('data:image/')) return s;
+  if (s.startsWith('http://') || s.startsWith('https://')) return s;
+  if (s.startsWith('/')) return s;
+  // Some backends return just the filename stored in /public
+  if (!s.includes('/') && (s.endsWith('.png') || s.endsWith('.jpg') || s.endsWith('.jpeg') || s.endsWith('.webp'))) {
+    return `/${s}`;
   }
+  return s;
+}
+
+function pickProfilePhoto(p: Profile | null): string | null {
+  if (!p) return null;
+  const fromArray = Array.isArray(p.photos) ? p.photos.find(Boolean) : null;
+  return normalizePhotoUrl(fromArray || p.photoUrl || null);
+}
 
 function placeholderAvatarDataUri(name?: string) {
-  const safe = (name || "User").trim();
-  const initials = safe
-    .split(/\s+/)
+  const initials = (name || 'User')
+    .split(' ')
     .filter(Boolean)
     .slice(0, 2)
-    .map((s) => s[0]?.toUpperCase() ?? "")
-    .join("") || "U";
+    .map((w) => w[0]?.toUpperCase())
+    .join('');
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000">
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800">
     <defs>
-      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#2a0f2b"/>
-        <stop offset="100%" stop-color="#1a1a2e"/>
+      <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+        <stop offset="0" stop-color="#4b134f"/>
+        <stop offset="1" stop-color="#1d0b2a"/>
       </linearGradient>
     </defs>
     <rect width="100%" height="100%" fill="url(#g)"/>
-    <text x="50%" y="55%" text-anchor="middle" dominant-baseline="middle"
+    <circle cx="400" cy="320" r="140" fill="rgba(255,255,255,0.10)"/>
+    <text x="50%" y="56%" dominant-baseline="middle" text-anchor="middle"
       font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial"
-      font-size="160" fill="rgba(255,255,255,0.85)">${initials}</text>
+      font-size="150" fill="rgba(255,255,255,0.85)" font-weight="700">${initials || 'U'}</text>
   </svg>`;
-
-  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-}
-
-
-const SEEN_KEY = "ff_seen_profiles_v1";
-
-function loadSeen(): Set<string> {
-  try {
-    const raw = localStorage.getItem(SEEN_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return new Set();
-    return new Set(arr.filter((x) => typeof x === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveSeen(seen: Set<string>) {
-  try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify(Array.from(seen)));
-  } catch {}
-}
-
-function demoDeck(): Profile[] {
-  // Safe fallback deck for UI testing if backend returns none.
-  return [
-    {
-      id: "demo_donald",
-      name: "Donald",
-      age: 34,
-      city: "Miami",
-      bio: "Just here to test the swipe deck.",
-      photoUrl: "https://picsum.photos/800/1200?random=11"},
-    {
-      id: "demo_jess",
-      name: "Jess",
-      age: 34,
-      city: "Orlando",
-      bio: "Demo profile — like/pass to test.",
-      photoUrl: "https://picsum.photos/800/1200?random=12"},
-    {
-      id: "demo_rebecca",
-      name: "Rebecca",
-      age: 44,
-      city: "Tampa",
-      bio: "Demo profile — tap View to open.",
-      photoUrl: "https://picsum.photos/800/1200?random=13"
-    }
-  ];
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 export default function DiscoverPage() {
-  const token = requireSession();
+  const router = useRouter();
+
+  // ---------- auth guard (client-side) ----------
+  useEffect(() => {
+    const token = loadSession();
+    if (!token) router.push('/login');
+  }, [router]);
+
+  // ---------- feed ----------
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [cursor, setCursor] = useState<number>(0);
-  const [status, setStatus] = useState<string>("");
-  const [busy, setBusy] = useState<boolean>(false);
-  const [useDemo, setUseDemo] = useState<boolean>(false);
-  const [dragX, setDragX] = useState<number>(0);
-  const [dragging, setDragging] = useState<boolean>(false);
-  const dragStartX = useRef<number>(0);
+  const [cursor, setCursor] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<string>('');
 
-  const originalDeckRef = useRef<Profile[] | null>(null);
+  // Restore swipe overlays + expanded sheet behavior
+  const [expanded, setExpanded] = useState(false);
 
-  const current = useMemo(() => profiles[cursor] || null, [profiles, cursor]);
+  const current = useMemo(() => profiles[cursor] ?? null, [profiles, cursor]);
+  const currentPhoto = useMemo(() => pickProfilePhoto(current), [current]);
 
-  async function refreshDeck() {
-    if (!token || busy) return;
-    setBusy(true);
-    setStatus("Refreshing…");
+  // ---------- swipe state ----------
+  const startRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const [drag, setDrag] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [busy, setBusy] = useState(false);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    window.clearTimeout((showToast as any)._t);
+    (showToast as any)._t = window.setTimeout(() => setToast(''), 2200);
+  }
+
+  function extractList(res: FeedResponse): Profile[] {
+    if (!res) return [];
+    const raw =
+      (Array.isArray(res.profiles) && res.profiles) ||
+      (Array.isArray(res.users) && res.users) ||
+      (Array.isArray(res.feed) && res.feed) ||
+      (Array.isArray(res.data) && res.data) ||
+      [];
+
+    // Normalize + filter obviously bad entries (this prevents “random” placeholder cards)
+    const list: Profile[] = raw
+      .map((u: any) => ({
+        id: toText(u?.id || u?._id || u?.uid || ''),
+        name: toText(u?.name || u?.displayName || u?.username || ''),
+        age: typeof u?.age === 'number' ? u.age : Number.isFinite(Number(u?.age)) ? Number(u.age) : undefined,
+        city: toText(u?.city || u?.location?.city || ''),
+        bio: toText(u?.bio || u?.about || ''),
+        interests: Array.isArray(u?.interests) ? u.interests.map(toText).filter(Boolean) : [],
+        photoUrl: u?.photoUrl ?? u?.photo ?? u?.avatarUrl ?? null,
+        photos: Array.isArray(u?.photos) ? u.photos : null
+      }))
+      .filter((u) => !!u.id);
+
+    return list;
+  }
+
+  async function loadFeed() {
+    setLoading(true);
     try {
-      const seen = loadSeen();
-      const res = await apiGet("/api/feed");
+      const res = await apiGet('/api/feed');
+      const list = extractList(res);
 
-      // Accept several possible backend shapes.
-      const rawList: any[] =
-        (Array.isArray(res) ? res : null) ||
-        (Array.isArray(res?.profiles) ? res.profiles : null) ||
-        (Array.isArray(res?.items) ? res.items : null) ||
-        [];
-
-      let list: Profile[] = rawList
-        .map((p: any) => ({
-          id: String(p?.id ?? p?._id ?? ""),
-          name: String(p?.name ?? p?.displayName ?? "Unknown"),
-          age: typeof p?.age === "number" ? p.age : undefined,
-          city: typeof p?.city === "string" ? p.city : undefined,
-          bio: typeof p?.bio === "string" ? p.bio : typeof p?.about === "string" ? p.about : undefined,
-          photoUrl:
-            typeof p?.photoUrl === "string"
-              ? p.photoUrl
-              : typeof p?.photo === "string"
-                ? p.photo
-                : typeof p?.avatarUrl === "string"
-                  ? p.avatarUrl
-                  : undefined
-        }))
-        .filter((p) => p.id && !seen.has(p.id));
-
-      // If backend has nothing, only use the demo deck when you explicitly enable it (Reset Deck).
       if (!list.length) {
-        if (useDemo) {
-          list = demoDeck().filter((p) => !seen.has(p.id));
-          setStatus("No more profiles available. Using demo deck for testing.");
-        } else {
-          setStatus("No more profiles available.");
-        }
-      } else {
-        setStatus("");
+        setProfiles([]);
+        setCursor(0);
+        showToast('No more profiles available right now.');
+        return;
       }
 
       setProfiles(list);
       setCursor(0);
-
-      if (!originalDeckRef.current) {
-        originalDeckRef.current = list;
-      }
     } catch (e: any) {
-      if (useDemo) {
-        setProfiles(demoDeck());
-        setCursor(0);
-        setStatus("Feed error. Showing demo deck for testing.");
-      } else {
-        setProfiles([]);
-        setCursor(0);
-        setStatus("Feed error. Try Refresh, or use Reset Deck to load a demo deck.");
-      }
+      showToast(e?.message ? `Feed error: ${e.message}` : 'Feed error');
+      setProfiles([]);
+      setCursor(0);
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   }
 
-  function markSeen(id: string) {
-    const seen = loadSeen();
-    seen.add(id);
-    saveSeen(seen);
+  useEffect(() => {
+    loadFeed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function resetSwipeState() {
+    startRef.current = null;
+    dragRef.current = null;
+    setDrag({ dx: 0, dy: 0 });
   }
 
-  
-  function onCardPointerDown(e: any) {
-    if (busy || !current) return;
-    setDragging(true);
-    dragStartX.current = e.clientX;
-    setDragX(0);
-    try {
-      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-    } catch {}
-  }
-
-  function onCardPointerMove(e: any) {
-    if (!dragging) return;
-    const dx = e.clientX - dragStartX.current;
-    setDragX(dx);
-  }
-
-  function onCardPointerUp(e: any) {
-    if (!dragging) return;
-    setDragging(false);
-    const dx = e.clientX - dragStartX.current;
-    const TH = 120;
-    if (dx > TH) {
-      setDragX(0);
-      sendDecision("like");
-      return;
-    }
-    if (dx < -TH) {
-      setDragX(0);
-      sendDecision("pass");
-      return;
-    }
-    setDragX(0);
-  }
-
-async function sendDecision(decision: "like" | "pass") {
-    if (!token || !current || busy) return;
+  async function sendDecision(decision: 'like' | 'pass') {
+    if (!current || busy) return;
     setBusy(true);
     try {
-      markSeen(current.id);
-
-      // Best effort: call backend (ignore failures so UI keeps moving)
+      // Best-effort: backend call, ignore failures so UI still works
       try {
-        await apiPost("/api/decision", { targetUserId: current.id, decision });
+        await apiPost('/api/decision', { targetUserId: current.id, decision });
       } catch {}
 
       setCursor((c) => c + 1);
-      setStatus(decision === "like" ? "Liked." : "Passed.");
-      setTimeout(() => setStatus(""), 900);
+      resetSwipeState();
+      setExpanded(false);
     } finally {
       setBusy(false);
     }
   }
 
-  function resetDeck() {
-    // Explicitly enable demo deck for testing (so we don't show random demo photos unless you ask for it).
-    setUseDemo(true);
-    try {
-      localStorage.removeItem(SEEN_KEY);
-    } catch {}
-    const deck = demoDeck();
-    originalDeckRef.current = deck;
-    setProfiles(deck);
-    setCursor(0);
-    setDragX(0);
-    setDragging(false);
-    setStatus("Demo deck loaded.");
-    setTimeout(() => setStatus(""), 900);
+  // ---------- pointer handlers ----------
+  const SWIPE_X = 120;   // px for like/pass commit
+  const SHEET_UP = 90;   // px for expand
+  const SHEET_DOWN = 90; // px for close expanded
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (busy) return;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    startRef.current = { x: e.clientX, y: e.clientY, t: Date.now() };
+    dragRef.current = { dx: 0, dy: 0 };
+    setDrag({ dx: 0, dy: 0 });
   }
 
-  // Keyboard shortcuts for quick testing:
-  // Left arrow = pass, Right arrow = like, R = reset
-  useEffect(() => {
-    if (!token) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") sendDecision("pass");
-      if (e.key === "ArrowRight") sendDecision("like");
-      if (e.key.toLowerCase() === "r") resetDeck();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, current, busy]);
+  function onPointerMove(e: React.PointerEvent) {
+    if (!startRef.current) return;
 
-  useEffect(() => {
-    if (!token) return;
-    refreshDeck();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
 
-  const bgStyle: React.CSSProperties = {
-    minHeight: "100vh",
-    padding: "24px 16px 40px",
-    background:
-      "radial-gradient(900px 600px at 15% 10%, rgba(255, 64, 157, 0.22), rgba(0,0,0,0) 55%), radial-gradient(900px 600px at 85% 25%, rgba(148, 89, 255, 0.22), rgba(0,0,0,0) 55%), linear-gradient(135deg, #140017, #0b0010 55%, #070012)",
-    color: "rgba(255,255,255,0.92)"
+    dragRef.current = { dx, dy };
+    setDrag({ dx, dy });
+  }
+
+  function onPointerUp() {
+    const d = dragRef.current;
+    resetSwipeState();
+
+    if (!d || !current || busy) return;
+
+    const absX = Math.abs(d.dx);
+    const absY = Math.abs(d.dy);
+
+    // Expanded sheet: swipe down to close
+    if (expanded) {
+      if (d.dy > SHEET_DOWN && absY > absX) {
+        setExpanded(false);
+      }
+      return;
+    }
+
+    // Not expanded:
+    // swipe up to expand (vertical dominant)
+    if (d.dy < -SHEET_UP && absY > absX) {
+      setExpanded(true);
+      return;
+    }
+
+    // horizontal commit like/pass
+    if (absX >= SWIPE_X && absX > absY) {
+      if (d.dx > 0) sendDecision('like');
+      else sendDecision('pass');
+      return;
+    }
+  }
+
+  // ---------- UI styles ----------
+  const page: React.CSSProperties = {
+    minHeight: '100vh',
+    padding: '14px 12px 28px',
+    background: 'radial-gradient(1200px 800px at 25% 20%, rgba(255,64,160,0.18), transparent 55%), radial-gradient(900px 700px at 80% 35%, rgba(120,70,255,0.18), transparent 55%), linear-gradient(180deg, #0a0712, #150820)'
   };
 
-  const topBar: React.CSSProperties = {
+  const header: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    margin: '6px auto 18px',
     maxWidth: 980,
-    margin: "0 auto 18px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12
+    position: 'relative'
   };
 
-  const pill: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 36,
-    padding: "0 12px",
-    borderRadius: 18,
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(0,0,0,0.22)",
-    color: "rgba(255,255,255,0.92)",
-    textDecoration: "none",
-    cursor: "pointer",
-    userSelect: "none"
+  const titleWrap: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0
   };
 
-  const statusToast: React.CSSProperties = {
-    position: "fixed",
-    left: 12,
-    right: 12,
-    top: 12,
-    zIndex: 50,
-    maxWidth: 720,
-    margin: "0 auto",
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(10, 0, 16, 0.72)",
-    backdropFilter: "blur(10px)",
-    WebkitBackdropFilter: "blur(10px)",
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 13
+  const brandImg: React.CSSProperties = {
+    height: 34,
+    width: 'auto',
+    objectFit: 'contain',
+    filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))'
+  };
+
+  const title: React.CSSProperties = {
+    margin: 0,
+    fontSize: 20,
+    letterSpacing: 0.2,
+    color: 'rgba(255,255,255,0.92)'
+  };
+
+  const subtitle: React.CSSProperties = {
+    margin: 0,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.60)'
   };
 
   const cardWrap: React.CSSProperties = {
-    maxWidth: 980,
-    margin: "0 auto",
-    display: "grid",
-    placeItems: "center"
+    margin: '0 auto',
+    maxWidth: 420,
+    width: '100%',
+    position: 'relative'
   };
 
   const card: React.CSSProperties = {
-    width: "min(520px, 92vw)",
-    aspectRatio: "3 / 4",
-    borderRadius: 24,
-    position: "relative",
-    overflow: "hidden",
-    border: "1px solid rgba(255,255,255,0.18)",
-    boxShadow: "0 18px 60px rgba(0,0,0,0.45)"
+    width: '100%',
+    height: 560,
+    borderRadius: 22,
+    overflow: 'hidden',
+    border: '1px solid rgba(255,255,255,0.10)',
+    boxShadow: '0 26px 80px rgba(0,0,0,0.55)',
+    background: 'rgba(255,255,255,0.04)',
+    position: 'relative',
+    touchAction: 'none'
   };
 
   const imgStyle: React.CSSProperties = {
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-    pointerEvents: "none",
-    userSelect: "none",
-    filter: "contrast(1.03) saturate(1.05)"
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    transform: 'scale(1.01)',
+    filter: 'saturate(1.05) contrast(1.03)'
   };
 
-  const overlay: React.CSSProperties = {
-    position: "absolute",
+  const gradientOverlay: React.CSSProperties = {
+    position: 'absolute',
     inset: 0,
     background:
-      "linear-gradient(180deg, rgba(0,0,0,0.00) 40%, rgba(0,0,0,0.58) 78%, rgba(0,0,0,0.78) 100%)"
+      'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 55%, rgba(0,0,0,0.78) 100%)'
   };
 
-  const footer: React.CSSProperties = {
-    position: "absolute",
+  const namePlate: React.CSSProperties = {
+    position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 14,
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    gap: 12
+    bottom: 16,
+    display: 'grid',
+    gap: 6
   };
 
-  const nameStyle: React.CSSProperties = {
-    margin: 0,
+  const nameLine: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 8,
+    justifyContent: 'space-between'
+  };
+
+  const nameText: React.CSSProperties = {
     fontSize: 22,
-    letterSpacing: 0.2
+    fontWeight: 800,
+    color: 'rgba(255,255,255,0.95)',
+    textShadow: '0 8px 22px rgba(0,0,0,0.55)'
   };
 
-  const mini: React.CSSProperties = {
-    margin: "4px 0 0",
-    fontSize: 13,
-    opacity: 0.86
+  const small: React.CSSProperties = {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.70)'
   };
 
   const actions: React.CSSProperties = {
-    display: "flex",
-    gap: 10
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    position: 'absolute',
+    bottom: 18,
+    right: 16
   };
 
-  const actionBtn = (variant: "pass" | "like" | "view"): React.CSSProperties => ({
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    border: "1px solid rgba(255,255,255,0.20)",
+  const iconBtn = (kind: 'pass' | 'view' | 'like'): React.CSSProperties => ({
+    width: kind === 'view' ? 42 : 46,
+    height: kind === 'view' ? 42 : 46,
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.16)',
     background:
-      variant === "like"
-        ? "rgba(255, 64, 157, 0.35)"
-        : variant === "pass"
-          ? "rgba(255,255,255,0.10)"
-          : "rgba(148, 89, 255, 0.28)",
-    color: "rgba(255,255,255,0.95)",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    userSelect: "none"
+      kind === 'like'
+        ? 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.20), rgba(255,64,160,0.22))'
+        : kind === 'pass'
+        ? 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), rgba(110,110,110,0.18))'
+        : 'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), rgba(120,70,255,0.18))',
+    boxShadow: '0 16px 34px rgba(0,0,0,0.38)',
+    display: 'grid',
+    placeItems: 'center',
+    color: 'rgba(255,255,255,0.92)',
+    cursor: 'pointer',
+    userSelect: 'none'
   });
 
-  function logout() {
-    try {
-      clearSession();
-    } catch {}
-    window.location.href = "/login";
-  }
+  const overlayLabel: React.CSSProperties = {
+    position: 'absolute',
+    top: 22,
+    left: 22,
+    padding: '10px 14px',
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.18)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    fontWeight: 900,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: '#fff',
+    boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
+    pointerEvents: 'none'
+  };
+
+  const sheet: React.CSSProperties = {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(15, 8, 24, 0.88)',
+    borderTop: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '22px 22px 0 0',
+    padding: '16px 16px 18px',
+    transform: expanded ? 'translateY(0)' : 'translateY(72%)',
+    transition: 'transform 220ms ease',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)'
+  };
+
+  const sheetHandle: React.CSSProperties = {
+    width: 52,
+    height: 6,
+    borderRadius: 999,
+    background: 'rgba(255,255,255,0.20)',
+    margin: '0 auto 12px'
+  };
+
+  const sheetTitle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 8
+  };
+
+  const sheetName: React.CSSProperties = {
+    fontSize: 20,
+    fontWeight: 900,
+    color: 'rgba(255,255,255,0.95)',
+    margin: 0
+  };
+
+  const chipRow: React.CSSProperties = {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10
+  };
+
+  const chip: React.CSSProperties = {
+    padding: '6px 10px',
+    borderRadius: 999,
+    background: 'rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255,255,255,0.10)',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.78)'
+  };
+
+  // Drag transform for the card
+  const cardTransform = useMemo(() => {
+    if (expanded) return 'translate3d(0,0,0)';
+    const dx = drag.dx;
+    const dy = drag.dy;
+    const rot = Math.max(-12, Math.min(12, dx / 18));
+    return `translate3d(${dx}px, ${dy * 0.15}px, 0) rotate(${rot}deg)`;
+  }, [drag, expanded]);
+
+  const likeOpacity = useMemo(() => {
+    if (expanded) return 0;
+    return Math.max(0, Math.min(1, (drag.dx - 24) / 90));
+  }, [drag.dx, expanded]);
+
+  const passOpacity = useMemo(() => {
+    if (expanded) return 0;
+    return Math.max(0, Math.min(1, (-drag.dx - 24) / 90));
+  }, [drag.dx, expanded]);
+
+  const upHintOpacity = useMemo(() => {
+    if (expanded) return 0;
+    const dy = -drag.dy;
+    return Math.max(0, Math.min(1, (dy - 10) / 80));
+  }, [drag.dy, expanded]);
 
   return (
-    <div style={bgStyle}>
-      {status ? <div style={statusToast}>{status}</div> : null}
+    <div style={page}>
+      <div style={header}>
+        <div style={titleWrap}>
+          <button
+            aria-label="Menu"
+            title="Menu"
+            onClick={() => {
+              // simple toggle: relies on CSS in globals for burger drawer if present
+              const el = document.getElementById('ff-burger');
+              if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+            }}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.06)',
+              color: 'rgba(255,255,255,0.92)',
+              cursor: 'pointer'
+            }}
+          >
+            ☰
+          </button>
 
-      <div style={topBar}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img
-            src="/FFmenuheaderlogo.png"
-            alt="FrugalFetishes"
-            style={{ height: 28, width: "auto", filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.6))" }}
-          />
-          <div style={{ fontWeight: 700, letterSpacing: 0.2 }}>Discover</div>
+          <img src="/frugalfetishes.png" alt="FrugalFetishes" style={brandImg} onError={(e) => {
+            (e.currentTarget as HTMLImageElement).style.display = 'none';
+          }} />
+          <div style={{ minWidth: 0 }}>
+            <p style={title}>Discover</p>
+            <p style={subtitle}>{loading ? 'Loading…' : current ? 'Swipe left/right · swipe up for profile' : 'No profiles'}</p>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <button style={pill} onClick={resetDeck} disabled={busy}>
-            Reset Deck
-          </button>
-          <button style={pill} onClick={refreshDeck} disabled={busy}>
-            Refresh
-          </button>
-          <Link style={pill} href="/matches">
-            Matches
-          </Link>
-          <button style={pill} onClick={logout}>
-            Logout
-          </button>
+        <div id="ff-burger" style={{
+          display: 'none',
+          position: 'absolute',
+          top: 46,
+          left: 0,
+          background: 'rgba(15, 8, 24, 0.92)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 14,
+          padding: 10,
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          boxShadow: '0 18px 50px rgba(0,0,0,0.45)',
+          minWidth: 180,
+          zIndex: 20
+        }}>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <button onClick={() => loadFeed()} style={{ ...chip, cursor: 'pointer', textAlign: 'left' }}>Refresh feed</button>
+            <Link href="/matches" style={{ ...chip, textDecoration: 'none' }}>Matches</Link>
+            <button
+              onClick={() => {
+                // logout
+                try { localStorage.removeItem('ff_session'); } catch {}
+                router.push('/login');
+              }}
+              style={{ ...chip, cursor: 'pointer', textAlign: 'left' }}
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => loadFeed()} style={{ ...chip, cursor: 'pointer' }}>Refresh</button>
+          <Link href="/matches" style={{ ...chip, textDecoration: 'none' }}>Matches</Link>
         </div>
       </div>
 
+      {toast ? (
+        <div style={{
+          maxWidth: 980,
+          margin: '0 auto 14px',
+          padding: '10px 12px',
+          borderRadius: 14,
+          border: '1px solid rgba(255,255,255,0.12)',
+          background: 'rgba(15, 8, 24, 0.75)',
+          color: 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)'
+        }}>
+          {toast}
+        </div>
+      ) : null}
+
       <div style={cardWrap}>
         {!current ? (
-          <div
-            style={{
-              width: "min(720px, 94vw)",
-              padding: 18,
-              borderRadius: 18,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(0,0,0,0.22)",
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
-              lineHeight: 1.4
-            }}
-          >
-            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>No profiles available</div>
-            <div style={{ opacity: 0.9 }}>
-              Click <b>Reset Deck</b> to clear seen profiles, or <b>Refresh</b> to fetch new ones.
-              <br />
-              Keyboard: <b>←</b> pass, <b>→</b> like, <b>R</b> reset.
+          <div style={{
+            height: 560,
+            borderRadius: 22,
+            border: '1px solid rgba(255,255,255,0.10)',
+            background: 'rgba(255,255,255,0.04)',
+            display: 'grid',
+            placeItems: 'center',
+            color: 'rgba(255,255,255,0.75)',
+            textAlign: 'center',
+            padding: 18
+          }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>No more profiles</div>
+              <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 14 }}>
+                Hit Refresh to check again.
+              </div>
+              <button onClick={() => loadFeed()} style={{ ...chip, cursor: 'pointer' }}>Refresh feed</button>
             </div>
           </div>
         ) : (
           <div
-            style={{
-              ...card,
-              transform: `translateX(${dragX}px) rotate(${dragX / 20}deg)`,
-              transition: dragging ? "none" : "transform 200ms ease",
-              cursor: "grab",
-            }}
-            onPointerDown={onCardPointerDown}
-            onPointerMove={onCardPointerMove}
-            onPointerUp={onCardPointerUp}
-            onPointerCancel={onCardPointerUp}
+            style={{ ...card, transform: cardTransform, transition: startRef.current ? 'none' : 'transform 180ms ease' }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
           >
-                      <img
-            src={current.photoUrl ?? placeholderAvatarDataUri(current.name)}
-            alt={`${current.name}'s photo`}
-            draggable={false}
-            style={imgStyle}
-            onError={(e) => {
-              // If a remote/local image fails, fall back to a generated placeholder (NOT the brand logo).
-              const el = e.currentTarget as HTMLImageElement;
-              el.onerror = null;
-              el.src = placeholderAvatarDataUri(current.name);
-            }}
-          />
-            <div style={overlay} />
+            <img
+              src={currentPhoto ?? placeholderAvatarDataUri(current.name)}
+              alt={`${current.name || 'Profile'} photo`}
+              style={imgStyle}
+              onError={(e) => {
+                const img = e.currentTarget as HTMLImageElement;
+                img.src = placeholderAvatarDataUri(current.name);
+              }}
+            />
+            <div style={gradientOverlay} />
 
-            <div style={footer}>
-              <div>
-                <h2 style={nameStyle}>
-                  {current.name}
-                  {typeof current.age === "number" ? `, ${current.age}` : ""}
-                </h2>
-                <div style={mini}>
-                  {current.city ? current.city : ""}
-                  {current.bio ? (current.city ? " • " : "") + current.bio : ""}
+            {/* LIKE / PASS overlays */}
+            <div style={{ ...overlayLabel, opacity: likeOpacity, right: 22, left: 'auto', background: 'rgba(255,64,160,0.18)' }}>
+              Like
+            </div>
+            <div style={{ ...overlayLabel, opacity: passOpacity, background: 'rgba(255,255,255,0.08)' }}>
+              Pass
+            </div>
+            <div style={{ ...overlayLabel, opacity: upHintOpacity, left: '50%', transform: 'translateX(-50%)', background: 'rgba(120,70,255,0.16)' }}>
+              Profile
+            </div>
+
+            <div style={namePlate}>
+              <div style={nameLine}>
+                <div style={nameText}>
+                  {current.name || 'User'}
+                  {typeof current.age === 'number' ? `, ${current.age}` : ''}
                 </div>
+                <div style={small}>{current.city || ''}</div>
+              </div>
+              <div style={{ ...small, opacity: 0.86, maxWidth: 360 }}>
+                {current.bio ? current.bio.slice(0, 84) + (current.bio.length > 84 ? '…' : '') : 'Swipe up to see the full profile.'}
+              </div>
+            </div>
+
+            <div style={actions}>
+              <button aria-label="Pass" title="Pass" disabled={busy} onClick={() => sendDecision('pass')} style={iconBtn('pass')}>
+                ✕
+              </button>
+
+              <Link aria-label="View" title="View" href={`/matches/${encodeURIComponent(current.id)}`} style={iconBtn('view')}>
+                👁
+              </Link>
+
+              <button aria-label="Like" title="Like" disabled={busy} onClick={() => sendDecision('like')} style={iconBtn('like')}>
+                ♥
+              </button>
+            </div>
+
+            {/* bottom sheet (expanded profile) */}
+            <div style={sheet}>
+              <div style={sheetHandle} />
+              <div style={sheetTitle}>
+                <h2 style={sheetName}>
+                  {current.name || 'User'} {typeof current.age === 'number' ? `· ${current.age}` : ''}
+                </h2>
+                <div style={{ ...small, opacity: 0.8 }}>{current.city || ''}</div>
               </div>
 
-              <div style={actions}>
-                <button style={actionBtn("pass")} onClick={() => sendDecision("pass")} aria-label="Pass" disabled={busy}>
-                  ✕
-                </button>
-                <Link style={actionBtn("view")} href={`/matches/${encodeURIComponent(current.id)}`} aria-label="View">
-                  👁
-                </Link>
-                <button style={actionBtn("like")} onClick={() => sendDecision("like")} aria-label="Like" disabled={busy}>
-                  ♥
-                </button>
+              <div style={{ ...small, opacity: 0.9, lineHeight: 1.4 }}>
+                {current.bio || 'No bio yet.'}
+              </div>
+
+              {Array.isArray(current.interests) && current.interests.length ? (
+                <div style={chipRow}>
+                  {current.interests.slice(0, 10).map((t) => (
+                    <span key={t} style={chip}>{t}</span>
+                  ))}
+                </div>
+              ) : null}
+
+              <div style={{ marginTop: 12, ...small, opacity: 0.7 }}>
+                Swipe down to return to Discover.
               </div>
             </div>
           </div>
         )}
       </div>
 
-      <div style={{ maxWidth: 980, margin: "16px auto 0", opacity: 0.75, fontSize: 12, textAlign: "center" }}>
-        Swipe is enabled on desktop via keyboard shortcuts for now. Mobile swipe can be layered back in once the feed is stable.
+      <div style={{ maxWidth: 980, margin: '14px auto 0', opacity: 0.65, color: 'rgba(255,255,255,0.75)', fontSize: 12, textAlign: 'center' }}>
+        Tip: Swipe right = Like · Swipe left = Pass · Swipe up = Profile · Swipe down (in profile) = Back
       </div>
     </div>
   );
