@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
-import { uidFromToken, recordLike, saveUserProfileSnapshot } from '@/lib/socialStore';
+import { uidFromToken, like } from '@/lib/socialStore';
 
 type Profile = {
   id: string;
@@ -25,6 +25,7 @@ type Profile = {
 
 const DECK_KEY = 'ff_deck_profiles_v2';
 const IDX_KEY = 'ff_deck_idx_v2';
+const MATCHES_KEY = 'ff_matches_v2';
 
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
   try {
@@ -113,6 +114,11 @@ function placeholderAvatarDataUri(name: string) {
 type SwipeLabel = 'like' | 'pass' | null;
 
 export default function DiscoverPage() {
+  const token = useMemo(() => {
+    try { return requireSession(); } catch { return null as any; }
+  }, []);
+  const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
+
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<string>('');
@@ -263,6 +269,23 @@ export default function DiscoverPage() {
     }
   }
 
+  function persistLocalMatch(p: Profile) {
+    try {
+      const list = loadLS<any[]>(MATCHES_KEY, []);
+      if (list.some((m) => m?.userId === p.id)) return;
+      list.unshift({
+        id: `m_${p.id}`,
+        userId: p.id,
+        name: p.name,
+        age: p.age,
+        city: p.city,
+        photoUrl: pickPhotoUrl(p),
+        matchedAt: Date.now(),
+      });
+      saveLS(MATCHES_KEY, list);
+    } catch {}
+  }
+
   function nextCard() {
     setIdx((i) => {
       const n = i + 1;
@@ -277,45 +300,15 @@ export default function DiscoverPage() {
   function decide(decision: 'like' | 'pass') {
     if (!current) return;
     if (decision === 'like') {
-      let uid = 'anon';
       try {
-        const token = requireSession();
-        uid = uidFromToken(token) || 'anon';
-      } catch {}
-
-      // Save snapshot so /matches can show name/photo instead of raw ids
-      try {
-        saveUserProfileSnapshot({
-          uid: String(current.id),
-          name: current.name,
-          age: current.age,
-          city: current.city,
-          bio: current.bio,
-          photoUrl: pickPhotoUrl(current) || undefined,
-          profilePhotoUrl: current.profilePhotoUrl,
-          primaryPhotoUrl: current.primaryPhotoUrl,
-          mainPhotoUrl: current.mainPhotoUrl,
-          imageUrl: current.imageUrl,
-          avatarUrl: current.avatarUrl,
-        });
-      } catch {}
-
-      try {
-        const r = recordLike(uid, String(current.id), {
-          uid: String(current.id),
-          name: current.name,
-          age: current.age,
-          city: current.city,
-          bio: current.bio,
-          photoUrl: pickPhotoUrl(current) || undefined,
-          profilePhotoUrl: current.profilePhotoUrl,
-          primaryPhotoUrl: current.primaryPhotoUrl,
-          mainPhotoUrl: current.mainPhotoUrl,
-          imageUrl: current.imageUrl,
-          avatarUrl: current.avatarUrl,
-        });
-        if (r.isMatch) setStatus(`✅ Match with ${current.name}!`);
-      } catch {}
+        const res = like(current.id, uid);
+        if (res.matched) {
+          // optional: quick hint; keeps UI simple
+          console.log('Matched!', res.matchId);
+        }
+      } catch (e) {
+        console.warn('like() failed', e);
+      }
     }
     void sendDecision(decision, current.id);
     nextCard();
