@@ -1,191 +1,176 @@
 'use client';
 
-import Link from 'next/link';
-import { useMemo } from 'react';
-import AppHeader from '@/components/AppHeader';
-import { requireSession } from '@/lib/session';
-import {
-  getMatchesFor,
-  getChat,
-  loadUserProfileSnapshot,
-  uidFromToken,
-  unreadCountForMatch,
-  type Match,
-} from '@/lib/socialStore';
-
-function placeholderAvatarDataUri(label: string) {
-  const seed = (label || 'U').trim();
-  const ch = (seed[0] || 'U').toUpperCase();
-  // simple hash -> 24bit color
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  const bg = `#${((h >>> 8) & 0xffffff).toString(16).padStart(6, '0')}`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
-  <rect width="100%" height="100%" rx="16" ry="16" fill="${bg}"/>
-  <text x="50%" y="55%" text-anchor="middle" font-family="Arial" font-size="34" fill="#fff" font-weight="700">${ch}</text>
-</svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
-
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import AppHeader from "@/components/AppHeader";
+import { requireSession } from "@/lib/session";
+import { uidFromToken, getMatchesFor, loadUserProfileSnapshot, type Match } from "@/lib/socialStore";
 
 type Row = {
   matchId: string;
   otherUid: string;
   name: string;
   photo: string;
-  lastAt?: number;
+  lastTs: number;
   unread: number;
 };
 
-function toMs(v: any): number | undefined {
-  if (v == null) return undefined;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string') {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  if (typeof v?.toMillis === 'function') {
-    try { return v.toMillis(); } catch {}
-  }
-  if (typeof v?.seconds === 'number') return v.seconds * 1000;
-  return undefined;
+function safeNum(v: any): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
-function displayName(p: any, fallbackUid: string) {
-  const name = p?.displayName || p?.name || p?.username || '';
-  if (typeof name === 'string' && name.trim()) return name.trim();
-  if (fallbackUid.includes('@')) return fallbackUid.split('@')[0];
-  return fallbackUid.slice(0, 8);
+function displayNameFromProfile(p: any, fallbackUid: string) {
+  const name =
+    p?.displayName ||
+    p?.name ||
+    p?.fullName ||
+    p?.username ||
+    p?.email?.split?.("@")?.[0];
+
+  if (typeof name === "string" && name.trim()) return name.trim();
+  // fallback: short uid
+  if (typeof fallbackUid === "string" && fallbackUid.includes("@")) return fallbackUid.split("@")[0];
+  return (fallbackUid || "User").slice(0, 8);
 }
 
-function pickPhoto(p: any, fallbackLabel: string) {
-  const url =
+function photoFromProfile(p: any) {
+  return (
     p?.photoUrl ||
-    p?.photoURL ||
     p?.avatarUrl ||
-    p?.primaryPhotoUrl ||
-    (Array.isArray(p?.photos) && p.photos[0]?.url) ||
-    (Array.isArray(p?.gallery) && p.gallery[0]?.url) ||
-    '';
-  if (typeof url === 'string' && url.trim()) return url.trim();
-  return placeholderAvatarDataUri(fallbackLabel);
+    p?.photoURL ||
+    p?.avatar ||
+    "/icon.png"
+  );
 }
 
-function otherUidForMatch(m: Match, myUid: string) {
-  if (!m) return '';
-  return m.a === myUid ? m.b : m.b === myUid ? m.a : (m.b || m.a || '');
+function toMatchId(m: any): string {
+  if (!m) return "";
+  if (typeof m === "string") return m;
+  if (typeof m.id === "string") return m.id;
+  return String(m.id ?? "");
 }
 
-function fmtLast(ms?: number) {
-  if (!ms) return '';
-  try {
-    return new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
+function otherUidFromMatch(m: any, uid: string): string {
+  const a = (m as any).a ?? (m as any).userA ?? (m as any).uidA;
+  const b = (m as any).b ?? (m as any).userB ?? (m as any).uidB;
+  if (a === uid) return String(b ?? "");
+  if (b === uid) return String(a ?? "");
+  // fallback if shape is unknown
+  return String(b ?? a ?? "");
 }
 
 export default function MessagesPage() {
-  const token = useMemo(() => requireSession(), []);
-  const myUid = useMemo(() => uidFromToken(token) || 'anon', [token]);
+  const token = useMemo(() => {
+    try {
+      return requireSession();
+    } catch {
+      return null as any;
+    }
+  }, []);
 
-  const rows: Row[] = useMemo(() => {
-    let matches: Match[] = [];
-    try { matches = getMatchesFor(myUid) as Match[]; } catch {}
-    const out: Row[] = [];
+  const uid = useMemo(() => {
+    if (!token) return null;
+    try {
+      return uidFromToken(token ?? '');
+    } catch {
+      return null;
+    }
+  }, [token]);
 
-    for (const m of matches) {
-      const otherUid = otherUidForMatch(m, myUid);
-      const snap = otherUid ? loadUserProfileSnapshot(otherUid) : null;
-      const name = displayName(snap, otherUid || 'User');
-      const photo = pickPhoto(snap, name || otherUid || 'U');
+  const [rows, setRows] = useState<Row[]>([]);
 
-      const chat = getChat(m.id) || [];
-      const last = chat.length ? toMs(chat[chat.length - 1]?.createdAt) : toMs((m as any).createdAt);
-      const unread = unreadCountForMatch(m.id, myUid);
-      out.push({ matchId: m.id, otherUid, name, photo, lastAt: last, unread });
+  useEffect(() => {
+    if (!uid) {
+      setRows([]);
+      return;
     }
 
-    out.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
-    return out;
-  }, [myUid]);
+    // Build list from local store (matches + chat summaries).
+    let matches: Match[] = [];
+    try {
+      matches = (getMatchesFor(uid) as any[]) as Match[];
+    } catch {
+      matches = [];
+    }
+
+    const out: Row[] = [];
+    for (const m of matches) {
+      const matchId = toMatchId(m);
+      if (!matchId) continue;
+
+      const otherUid = otherUidFromMatch(m as any, uid);
+      const p = (() => {
+        try {
+          return loadUserProfileSnapshot(otherUid) as any;
+        } catch {
+          return null;
+        }
+      })();
+
+      const lastTs =
+        safeNum((m as any).lastMessageAt) ||
+        safeNum((m as any).lastTs) ||
+        safeNum((m as any).updatedAt) ||
+        safeNum((m as any).createdAt) ||
+        Date.now();
+
+      const unread =
+        safeNum((m as any).unread?.[uid]) ||
+        safeNum((m as any).unreadCount?.[uid]) ||
+        safeNum((m as any).unreadCount) ||
+        0;
+
+      out.push({
+        matchId,
+        otherUid,
+        name: displayNameFromProfile(p, otherUid),
+        photo: photoFromProfile(p),
+        lastTs,
+        unread,
+      });
+    }
+
+    out.sort((a, b) => b.lastTs - a.lastTs);
+    setRows(out);
+  }, [uid]);
 
   return (
     <div className="ff-page">
       <AppHeader active="messages" />
-
       <div className="ff-shell">
         <h1 className="ff-h1">Messages</h1>
 
-        {rows.length === 0 ? (
-          <div style={{ opacity: 0.85, padding: 14 }}>No chats yet.</div>
+        {!uid ? (
+          <div className="ff-muted">
+            You’re not logged in. Go to <Link href="/login">Login</Link>.
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="ff-muted">
+            No conversations yet. Match with someone first.
+          </div>
         ) : (
-          <div style={{ display: 'grid', gap: 10, maxWidth: 640 }}>
+          <div className="ff-list">
             {rows.map((r) => (
-              <div
-                key={r.matchId}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: 12,
-                  borderRadius: 16,
-                  border: '1px solid rgba(255,255,255,0.10)',
-                  background: 'rgba(255,255,255,0.06)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                  <img
-                    src={r.photo}
-                    alt={r.name || 'Chat'}
-                    style={{ width: 44, height: 44, borderRadius: 14, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.10)' }}
-                    draggable={false}
-                  />
-
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ fontWeight: 800, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {r.name || 'Someone'}
-                      </div>
-                      {r.unread ? (
-                        <span
-                          style={{
-                            minWidth: 18,
-                            height: 18,
-                            padding: '0 6px',
-                            borderRadius: 999,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 11,
-                            fontWeight: 800,
-                            background: '#ff3b30',
-                            color: '#fff',
-                          }}
-                        >
-                          {r.unread > 99 ? '99+' : String(r.unread)}
+              <div key={r.matchId} className="ff-row">
+                <div className="ff-row-left">
+                  <img className="ff-avatar" src={r.photo} alt={r.name} />
+                  <div className="ff-row-text">
+                    <div className="ff-row-title">
+                      {r.name}
+                      {r.unread > 0 ? (
+                        <span className="ff-badge" style={{ marginLeft: 8 }}>
+                          {r.unread}
                         </span>
                       ) : null}
                     </div>
-                    <div style={{ opacity: 0.75, fontSize: 12 }}>{fmtLast(r.lastAt)}</div>
+                    <div className="ff-row-sub">
+                      {new Date(r.lastTs).toLocaleString()}
+                    </div>
                   </div>
                 </div>
 
-                <Link
-                  href={`/chat/${encodeURIComponent(r.matchId)}`}
-                  style={{
-                    borderRadius: 999,
-                    padding: '9px 12px',
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    background: 'rgba(255,255,255,0.06)',
-                    color: 'rgba(255,255,255,0.92)',
-                    textDecoration: 'none',
-                    fontSize: 12,
-                    fontWeight: 800,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
+                <Link className="ff-btn" href={`/chat/${encodeURIComponent(r.matchId)}`}>
                   Open
                 </Link>
               </div>
