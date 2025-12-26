@@ -282,10 +282,27 @@ export function sendMessage(matchId: string, fromUid: string, text: string) {
 }
 
 // Back-compat helper used by /chat/[id]/page.tsx
-export function addChatMessage(matchId: string, payload: { fromUserId: string; text: string }) {
-  const fromUid = payload?.fromUserId || "anon";
-  const text = String(payload?.text ?? "").trim();
-  if (!text) return;
+export function addChatMessage(
+  matchId: string,
+  a: any,
+  b?: any,
+  c?: any
+) {
+  // Supports BOTH call shapes:
+  // 1) addChatMessage(matchId, { fromUserId, text })
+  // 2) addChatMessage(matchId, fromUid, _toUid, text)
+  let fromUid = "anon";
+  let text = "";
+
+  if (a && typeof a === "object" && ("fromUserId" in a || "text" in a)) {
+    fromUid = String((a as any).fromUserId || "anon");
+    text = String((a as any).text ?? "").trim();
+  } else {
+    fromUid = String(a || "anon");
+    text = String(c ?? "").trim();
+  }
+
+  if (!matchId || !text) return;
   sendMessage(matchId, fromUid, text);
 }
 
