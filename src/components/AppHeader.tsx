@@ -29,7 +29,6 @@ export default function AppHeader(props: { active?: ActiveTab }) {
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<CountsState>({ newMatches: 0, unreadMessages: 0 });
 
-  // Poll counts so hamburger dot + menu badges update even before menu is opened.
   useEffect(() => {
     const tick = () => {
       try {
@@ -46,7 +45,7 @@ export default function AppHeader(props: { active?: ActiveTab }) {
     };
 
     tick();
-    const id = window.setInterval(tick, 700);
+    const id = window.setInterval(tick, 600);
     return () => window.clearInterval(id);
   }, []);
 
@@ -59,17 +58,19 @@ export default function AppHeader(props: { active?: ActiveTab }) {
     window.location.href = "/login";
   }
 
+  // Put the dot INSIDE the hamburger circle so it can't be clipped by layout/CSS.
   const dotStyle: React.CSSProperties = {
     position: "absolute",
-    top: 6,
-    left: 20,
+    top: -2,
+    right: -2,
     width: 10,
     height: 10,
     borderRadius: 9999,
     background: "#ff3b30",
-    border: "2px solid rgba(0,0,0,0.35)",
-    boxShadow: "0 0 0 1px rgba(255,255,255,0.15)",
+    border: "2px solid rgba(0,0,0,0.45)",
+    boxShadow: "0 0 0 1px rgba(255,255,255,0.18)",
     pointerEvents: "none",
+    zIndex: 50,
   };
 
   const badgeStyle: React.CSSProperties = {
