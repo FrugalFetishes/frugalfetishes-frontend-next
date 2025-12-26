@@ -523,7 +523,6 @@ export default function DiscoverPage() {
           💬 Matches
         </Link>
       </div>
-      </div>
 
       {status ? <div style={topToast}>{status}</div> : null}
 
