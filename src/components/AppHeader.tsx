@@ -1,17 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { requireSession, clearSession } from "@/lib/session";
 import { uidFromToken, badgeCounts } from "@/lib/socialStore";
 
 type ActiveTab = "discover" | "matches" | "chat" | "profile";
-
-type CountsState = {
-  newMatches: number;
-  unreadMessages: number;
-};
+type CountsState = { newMatches: number; unreadMessages: number };
 
 function safeNum(v: any): number {
   const n = Number(v);
@@ -31,24 +27,14 @@ export default function AppHeader(props: { active?: ActiveTab }) {
       : "profile");
 
   const [open, setOpen] = useState(false);
-  const [counts, setCounts] = useState<CountsState>({
-    newMatches: 0,
-    unreadMessages: 0,
-  });
+  const [counts, setCounts] = useState<CountsState>({ newMatches: 0, unreadMessages: 0 });
 
-  const token = useMemo(() => {
-    try {
-      return requireSession();
-    } catch {
-      return null as any;
-    }
-  }, []);
-
-  const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
-
+  // Poll counts so hamburger dot + menu badges update even before menu is opened.
   useEffect(() => {
     const tick = () => {
       try {
+        const token = requireSession();
+        const uid = uidFromToken(token) ?? "anon";
         const raw: any = badgeCounts(uid);
         setCounts({
           newMatches: safeNum(raw?.matches),
@@ -60,11 +46,11 @@ export default function AppHeader(props: { active?: ActiveTab }) {
     };
 
     tick();
-    const id = window.setInterval(tick, 800);
+    const id = window.setInterval(tick, 700);
     return () => window.clearInterval(id);
-  }, [uid]);
+  }, []);
 
-  const anyBadge = (counts.newMatches + counts.unreadMessages) > 0;
+  const anyBadge = counts.newMatches + counts.unreadMessages > 0;
 
   function onLogout() {
     try {
@@ -73,6 +59,32 @@ export default function AppHeader(props: { active?: ActiveTab }) {
     window.location.href = "/login";
   }
 
+  const dotStyle: React.CSSProperties = {
+    position: "absolute",
+    top: 6,
+    left: 20,
+    width: 10,
+    height: 10,
+    borderRadius: 9999,
+    background: "#ff3b30",
+    border: "2px solid rgba(0,0,0,0.35)",
+    boxShadow: "0 0 0 1px rgba(255,255,255,0.15)",
+    pointerEvents: "none",
+  };
+
+  const badgeStyle: React.CSSProperties = {
+    marginLeft: "auto",
+    minWidth: 18,
+    height: 18,
+    padding: "0 6px",
+    borderRadius: 9999,
+    background: "#ff3b30",
+    color: "white",
+    fontSize: 12,
+    lineHeight: "18px",
+    textAlign: "center",
+  };
+
   return (
     <header className="ff-header">
       <div className="ff-header-left">
@@ -80,10 +92,12 @@ export default function AppHeader(props: { active?: ActiveTab }) {
           className="ff-hamburger"
           aria-label="Menu"
           onClick={() => setOpen((v) => !v)}
+          style={{ position: "relative" }}
         >
           <span className="ff-hamburger-icon">☰</span>
-          {anyBadge ? <span className="ff-badge-dot" aria-label="Notifications" /> : null}
+          {anyBadge ? <span style={dotStyle} aria-label="Notifications" /> : null}
         </button>
+
         <div className="ff-brand">FrugalFetishes</div>
       </div>
 
@@ -110,7 +124,7 @@ export default function AppHeader(props: { active?: ActiveTab }) {
           >
             <span>Matches</span>
             {counts.newMatches > 0 ? (
-              <span className="ff-menu-badge" aria-label={`${counts.newMatches} new matches`}>
+              <span style={badgeStyle} aria-label={`${counts.newMatches} new matches`}>
                 {counts.newMatches}
               </span>
             ) : null}
@@ -123,7 +137,7 @@ export default function AppHeader(props: { active?: ActiveTab }) {
           >
             <span>Messages</span>
             {counts.unreadMessages > 0 ? (
-              <span className="ff-menu-badge" aria-label={`${counts.unreadMessages} unread messages`}>
+              <span style={badgeStyle} aria-label={`${counts.unreadMessages} unread messages`}>
                 {counts.unreadMessages}
               </span>
             ) : null}
