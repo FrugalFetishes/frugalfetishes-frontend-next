@@ -14,8 +14,9 @@ import {
   loadUserProfileSnapshot,
 } from "@/lib/socialStore";
 
-// Type helper: socialStore snapshot is optional and may be null (local placeholder).
-type ProfileSnapshot = { name?: string; photoUrl?: string; headline?: string; age?: number; city?: string } | null;
+type ProfileSnapshot =
+  | { name?: string; displayName?: string; username?: string; email?: string; photoUrl?: string; avatarUrl?: string }
+  | null;
 
 type Row =
   | { kind: "date"; id: string; label: string }
@@ -37,13 +38,23 @@ function fmtTime(ts: number) {
   }
 }
 
+function fallbackNameFromUid(u: string): string {
+  if (!u) return "Chat";
+  if (u.includes("@")) return u.split("@")[0] || u;
+  return u.slice(0, 8);
+}
+
 export default function ChatPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const matchId = params?.id || "";
 
   const token = useMemo(() => {
-    try { return requireSession(); } catch { return null as any; }
+    try {
+      return requireSession();
+    } catch {
+      return null as any;
+    }
   }, []);
   const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
 
@@ -53,30 +64,50 @@ export default function ChatPage() {
     return parts[0] === uid ? parts[1] : parts[0];
   }, [matchId, uid]);
 
-  const other = useMemo<ProfileSnapshot>(() => (loadUserProfileSnapshot(otherUid) as any) as ProfileSnapshot, [otherUid]);
-  const otherName = other?.name || otherUid || "Chat";
+  const other = useMemo<ProfileSnapshot>(() => {
+    try {
+      return (loadUserProfileSnapshot(otherUid) as any) as ProfileSnapshot;
+    } catch {
+      return null;
+    }
+  }, [otherUid]);
+
+  const otherName =
+    other?.name || other?.displayName || other?.username || other?.email || fallbackNameFromUid(otherUid);
 
   const [text, setText] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
 
   useEffect(() => {
-    // opening chat clears unread badge for this thread
-    try { clearUnreadForChat(uid, matchId); } catch {}
+    try {
+      clearUnreadForChat(uid, matchId);
+    } catch {}
 
     const buildRows = () => {
-      const msgs = getChat(matchId);
+      const msgs: any[] = (() => {
+        try {
+          return getChat(matchId) as any[];
+        } catch {
+          return [];
+        }
+      })();
+
       const out: Row[] = [];
       let lastDay = "";
-      for (const m of msgs as any[]) {
-        const day = fmtDate(Number(m.createdAt) || 0);
+
+      for (const m of msgs) {
+        const ts = Number(m.createdAt) || 0;
+        const day = fmtDate(ts);
+
         if (day && day !== lastDay) {
           lastDay = day;
           out.push({ kind: "date", id: `d:${day}`, label: day });
         }
-        // socialStore message shape may be {fromUserId,text,createdAt} or legacy {from,text,createdAt}
-        const from = String(m.from ?? m.fromUserId ?? "");
-        out.push({ kind: "msg", id: String(m.id), from, text: String(m.text || ""), ts: Number(m.createdAt) || 0 });
+
+        const from = String(m.fromUid ?? m.fromUserId ?? m.from ?? "");
+        out.push({ kind: "msg", id: String(m.id ?? `${from}:${ts}`), from, text: String(m.text ?? ""), ts });
       }
+
       setRows(out);
     };
 
@@ -89,9 +120,15 @@ export default function ChatPage() {
     const t = text.trim();
     if (!t) return;
 
-    addChatMessage(matchId, { fromUserId: uid, text: t });
-    // mark unread for the other user (local)
-    if (otherUid) incrementUnread(otherUid, matchId);
+    // socialStore signature: addChatMessage(matchId, fromUid, toUid, text)
+    try {
+      addChatMessage(matchId, uid, otherUid, t);
+    } catch {}
+
+    try {
+      if (otherUid) incrementUnread(otherUid, matchId);
+    } catch {}
+
     setText("");
   }
 
@@ -101,9 +138,13 @@ export default function ChatPage() {
 
       <main className="ff-shell">
         <div className="ff-chat-top">
-          <button className="ff-pill" onClick={() => router.back()}>Back</button>
+          <button className="ff-pill" onClick={() => router.back()}>
+            Back
+          </button>
           <div className="ff-chat-title">{otherName}</div>
-          <Link className="ff-pill" href="/matches">Matches</Link>
+          <Link className="ff-pill" href="/matches">
+            Matches
+          </Link>
         </div>
 
         <div className="ff-chat">
@@ -112,7 +153,9 @@ export default function ChatPage() {
           ) : (
             rows.map((r) =>
               r.kind === "date" ? (
-                <div key={r.id} className="ff-chat-date">{r.label}</div>
+                <div key={r.id} className="ff-chat-date">
+                  {r.label}
+                </div>
               ) : (
                 <div key={r.id} className={r.from === uid ? "ff-bubble ff-bubble-me" : "ff-bubble"}>
                   <div className="ff-bubble-text">{r.text}</div>
@@ -129,9 +172,13 @@ export default function ChatPage() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Message…"
-            onKeyDown={(e) => { if (e.key === "Enter") onSend(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSend();
+            }}
           />
-          <button className="ff-pill" onClick={onSend}>Send</button>
+          <button className="ff-pill" onClick={onSend}>
+            Send
+          </button>
         </div>
       </main>
     </div>
