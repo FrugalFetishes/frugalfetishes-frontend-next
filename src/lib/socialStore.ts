@@ -311,4 +311,3 @@ export function loadUserProfileSnapshot(uid: string): UserProfileSnapshot | null
 }
 
 // ---- Compatibility re-exports (for older imports) ----
-export { incrementUnread };
