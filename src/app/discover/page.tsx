@@ -56,10 +56,13 @@ function normalizePhotoUrl(p?: string | null): string | null {
   // Never use site branding assets as a profile photo.
   if (s.includes('frugalfetishes.png') || s.includes('FFmenuheaderlogo.png')) return null;
 
+  // Next serves the /public folder at the site root.
+  // Normalize both "/public/x.png" and "x.png" -> "/x.png".
+  if (s.startsWith('/public/')) return `/${s.slice('/public/'.length)}`;
   if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:') || s.startsWith('/')) return s;
 
-  // Allow bare filenames that live in /public
-  return `/public/${s.replace(/^\/+/, '')}`;
+  // Bare filename -> from /public at root
+  return `/${s.replace(/^\/+/, '')}`;
 }
 
 function pickPhotoUrl(profile: any): string | null {
@@ -116,6 +119,7 @@ export default function DiscoverPage() {
   const [expanded, setExpanded] = useState(false);
   const [swipeLabel, setSwipeLabel] = useState<SwipeLabel>(null);
   const [busy, setBusy] = useState(false);
+  const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
 
   const drag = useRef({ active: false, x0: 0, y0: 0, dx: 0, dy: 0 });
   const [dragXY, setDragXY] = useState({ x: 0, y: 0 });
@@ -231,10 +235,27 @@ export default function DiscoverPage() {
   }
 
   async function sendDecision(decision: 'like' | 'pass', targetUserId: string) {
+    // If /api/decision is missing in the backend, we don't want to spam 404s.
+    if (!decisionApiEnabled) return;
+
     try {
-      await apiPost('/api/decision', { targetUserId, decision });
-    } catch {
-      // Ignore backend errors so UI still works.
+      // apiPost signature in this repo: (path, body)
+      const res: any = await apiPost('/api/decision', { targetUserId, decision });
+
+      // Some apiPost implementations return a Response; handle that too.
+      const status = typeof res?.status === 'number' ? res.status : null;
+      if (status === 404) {
+        setDecisionApiEnabled(false);
+        setStatus('Decision API not available (404). Using local-only matches for now.');
+      }
+    } catch (e: any) {
+      const msg = String(e?.message || e || '');
+      // If we can detect a 404 from the thrown error, disable future calls.
+      if (msg.includes('404')) {
+        setDecisionApiEnabled(false);
+        setStatus('Decision API not available (404). Using local-only matches for now.');
+      }
+      // Otherwise ignore so UI still works.
     }
   }
 
@@ -507,7 +528,7 @@ export default function DiscoverPage() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <img
-            src="/public/FFmenuheaderlogo.png"
+            src="/FFmenuheaderlogo.png"
             alt="FrugalFetishes"
             style={{ height: 26, width: 'auto', opacity: 0.95 }}
             onError={(e: any) => {
