@@ -1,298 +1,172 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
-import { requireSession, clearSession } from '@/lib/session';
-import { uidFromToken, badgeCounts } from '@/lib/socialStore';
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { requireSession, clearSession } from "@/lib/session";
+import { uidFromToken, badgeCounts } from "@/lib/socialStore";
+
+type ActiveTab =
+  | "discover"
+  | "matches"
+  | "messages"
+  | "advanced-search"
+  | "profile"
+  | "account"
+  | "subscribe";
 
 type Counts = { total: number; matches: number; messages: number };
 
-type MenuItem = {
-  key: string;
-  href: string;
-  label: string;
-  badge?: (c: Counts) => number;
-};
-
-const MENU: MenuItem[] = [
-  { key: 'discover', href: '/discover', label: 'Discover' },
-  { key: 'matches', href: '/matches', label: 'Matches', badge: (c) => c.matches },
-  { key: 'messages', href: '/messages', label: 'Messages', badge: (c) => c.messages },
-  { key: 'advanced-search', href: '/advanced-search', label: 'Advanced Search' },
-  { key: 'profile', href: '/profile', label: 'Profile' },
-  { key: 'account', href: '/account', label: 'Account Details' },
-  { key: 'subscribe', href: '/subscribe', label: 'Subscribe' },
-];
-
-function clamp(n: unknown): number {
+function clamp(n: any): number {
   const x = Number(n);
-  if (!Number.isFinite(x) || x < 0) return 0;
-  return Math.floor(x);
+  return Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0;
 }
 
-export default function AppHeader(props: { active?: string }) {
+export default function AppHeader(props: { active?: ActiveTab }) {
   const pathname = usePathname();
-  const router = useRouter();
+  const active: ActiveTab =
+    props.active ||
+    (pathname?.startsWith("/discover")
+      ? "discover"
+      : pathname?.startsWith("/matches")
+      ? "matches"
+      : pathname?.startsWith("/messages") || pathname?.startsWith("/chat")
+      ? "messages"
+      : pathname?.startsWith("/advanced-search")
+      ? "advanced-search"
+      : pathname?.startsWith("/account")
+      ? "account"
+      : pathname?.startsWith("/subscribe")
+      ? "subscribe"
+      : "profile");
+
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<Counts>({ total: 0, matches: 0, messages: 0 });
 
-  const token = useMemo(() => {
+  // Compute uid as a STRING (never null) so TS/build never fails.
+  const uid = useMemo(() => {
     try {
-      return requireSession();
+      const token = requireSession();
+      return uidFromToken(token) ?? "";
     } catch {
-      return null as any;
+      return "";
     }
   }, []);
 
-  const uid = useMemo(() => {
-    try {
-      return uidFromToken(token);
-    } catch {
-      return 'anon';
-    }
-  }, [token]);
-
-  // Keep badge counts fresh (and immediate) on any page.
   useEffect(() => {
-    let cancelled = false;
-
     const tick = () => {
       try {
-        const raw = badgeCounts(uid) as any;
-        const next: Counts = {
+        // Some flows can change session after mount; re-read token and uid for correctness.
+        const token = requireSession();
+        const u = uidFromToken(token) ?? "";
+        const raw: any = badgeCounts(u);
+
+        setCounts({
           total: clamp(raw?.total ?? (raw?.matches ?? 0) + (raw?.messages ?? 0)),
           matches: clamp(raw?.matches ?? raw?.newMatches ?? 0),
           messages: clamp(raw?.messages ?? raw?.unreadMessages ?? 0),
-        };
-        if (!cancelled) setCounts(next);
-      } catch {}
+        });
+      } catch {
+        setCounts({ total: 0, matches: 0, messages: 0 });
+      }
     };
 
     tick();
+    const id = window.setInterval(tick, 700);
+    return () => window.clearInterval(id);
+  }, []);
 
-    // Update when localStorage changes (other tab / same tab writes).
-    const onStorage = () => tick();
-    window.addEventListener('storage', onStorage);
+  const anyBadge = counts.total > 0;
 
-    const id = window.setInterval(tick, 400);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener('storage', onStorage);
-      window.clearInterval(id);
-    };
-  }, [uid]);
-
-  const activeKey = useMemo(() => {
-    if (!pathname) return props.active || '';
-    const p = pathname.toLowerCase();
-    if (p.startsWith('/discover')) return 'discover';
-    if (p.startsWith('/matches')) return 'matches';
-    if (p.startsWith('/messages')) return 'messages';
-    if (p.startsWith('/advanced-search')) return 'advanced-search';
-    if (p.startsWith('/account')) return 'account';
-    if (p.startsWith('/subscribe')) return 'subscribe';
-    if (p.startsWith('/profile')) return 'profile';
-    if (p.startsWith('/chat')) return 'chat';
-    return props.active || '';
-  }, [pathname, props.active]);
-
-  function logout() {
+  function onLogout() {
     try {
       clearSession();
     } catch {}
-    router.push('/login');
+    window.location.href = "/login";
   }
 
+  const dotStyle: React.CSSProperties = {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 9999,
+    background: "#ff3b30",
+    border: "2px solid rgba(0,0,0,0.45)",
+    boxShadow: "0 0 0 1px rgba(255,255,255,0.18)",
+    pointerEvents: "none",
+    zIndex: 9999,
+  };
+
+  const badgeStyle: React.CSSProperties = {
+    marginLeft: "auto",
+    minWidth: 18,
+    height: 18,
+    padding: "0 6px",
+    borderRadius: 9999,
+    background: "#ff3b30",
+    color: "white",
+    fontSize: 12,
+    lineHeight: "18px",
+    textAlign: "center",
+  };
+
   return (
-    <div className="ff-header">
+    <header className="ff-header">
       <div className="ff-header-left">
         <button
           className="ff-hamburger"
-          onClick={() => setOpen((v) => !v)}
           aria-label="Menu"
+          onClick={() => setOpen((v) => !v)}
+          style={{ position: "relative", overflow: "visible" }}
         >
-          <span className="ff-hamburger-lines" />
-          {counts.total > 0 && <span className="ff-dot" aria-label={`${counts.total} notifications`} />}
+          <span className="ff-hamburger-icon">☰</span>
+          {anyBadge ? <span style={dotStyle} aria-label="Notifications" /> : null}
         </button>
 
-        {open && (
-          <div className="ff-menu" role="menu">
-            {MENU.map((item) => {
-              const b = item.badge ? item.badge(counts) : 0;
-              return (
-                <Link
-                  key={item.key}
-                  href={item.href}
-                  className={`ff-menu-item ${activeKey === item.key ? 'active' : ''}`}
-                  onClick={() => setOpen(false)}
-                >
-                  <span>{item.label}</span>
-                  {b > 0 && <span className="ff-badge">{b}</span>}
-                </Link>
-              );
-            })}
-
-            <button className="ff-menu-item ff-menu-logout" onClick={logout}>
-              Logout
-            </button>
-          </div>
-        )}
+        <div className="ff-brand">FrugalFetishes</div>
       </div>
 
-      <div className="ff-header-center">FrugalFetishes</div>
-
       <div className="ff-header-right">
-        <button className="ff-logout" onClick={logout}>
+        <button className="ff-pill" onClick={onLogout}>
           Logout
         </button>
       </div>
 
-      <style jsx>{`
-        .ff-header {
-          position: relative;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 14px;
-        }
+      {open ? (
+        <nav className="ff-menu" role="navigation" aria-label="Main menu">
+          <Link className={active === "discover" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/discover" onClick={() => setOpen(false)}>
+            Discover
+          </Link>
 
-        .ff-header-left {
-          position: relative;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
+          <Link className={active === "matches" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/matches" onClick={() => setOpen(false)}>
+            <span>Matches</span>
+            {counts.matches > 0 ? <span style={badgeStyle}>{counts.matches}</span> : null}
+          </Link>
 
-        .ff-header-center {
-          font-weight: 700;
-          letter-spacing: 0.2px;
-        }
+          <Link className={active === "messages" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/messages" onClick={() => setOpen(false)}>
+            <span>Messages</span>
+            {counts.messages > 0 ? <span style={badgeStyle}>{counts.messages}</span> : null}
+          </Link>
 
-        .ff-header-right {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
+          <Link className={active === "advanced-search" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/advanced-search" onClick={() => setOpen(false)}>
+            Advanced Search
+          </Link>
 
-        .ff-hamburger {
-          position: relative;
-          width: 34px;
-          height: 34px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.18);
-          background: rgba(0,0,0,0.15);
-          display: grid;
-          place-items: center;
-        }
+          <Link className={active === "profile" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/profile" onClick={() => setOpen(false)}>
+            Profile
+          </Link>
 
-        .ff-hamburger-lines {
-          width: 16px;
-          height: 12px;
-          display: block;
-          position: relative;
-        }
-        .ff-hamburger-lines::before,
-        .ff-hamburger-lines::after,
-        .ff-hamburger-lines {
-          background: transparent;
-        }
-        .ff-hamburger-lines::before,
-        .ff-hamburger-lines::after {
-          content: '';
-          position: absolute;
-          left: 0;
-          right: 0;
-          height: 2px;
-          border-radius: 2px;
-          background: rgba(255,255,255,0.8);
-        }
-        .ff-hamburger-lines::before {
-          top: 1px;
-          box-shadow: 0 5px 0 rgba(255,255,255,0.8), 0 10px 0 rgba(255,255,255,0.8);
-        }
-        .ff-hamburger-lines::after {
-          display: none;
-        }
+          <Link className={active === "account" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/account" onClick={() => setOpen(false)}>
+            Account Details
+          </Link>
 
-        .ff-dot {
-          position: absolute;
-          top: -3px;
-          left: -3px;
-          width: 14px;
-          height: 14px;
-          border-radius: 999px;
-          background: #ff3b30;
-          border: 2px solid rgba(0,0,0,0.4);
-          box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
-          pointer-events: none;
-        }
-
-        .ff-menu {
-          position: absolute;
-          top: 42px;
-          left: 0;
-          min-width: 220px;
-          border-radius: 12px;
-          padding: 8px;
-          background: rgba(10, 8, 20, 0.92);
-          border: 1px solid rgba(255,255,255,0.12);
-          backdrop-filter: blur(10px);
-          z-index: 50;
-        }
-
-        .ff-menu-item {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          padding: 10px 10px;
-          border-radius: 10px;
-          color: rgba(255,255,255,0.9);
-          text-decoration: none;
-          font-size: 14px;
-          background: transparent;
-          border: 0;
-          cursor: pointer;
-        }
-
-        .ff-menu-item:hover {
-          background: rgba(255,255,255,0.08);
-        }
-
-        .ff-menu-item.active {
-          background: rgba(255,255,255,0.12);
-        }
-
-        .ff-badge {
-          min-width: 18px;
-          height: 18px;
-          padding: 0 6px;
-          border-radius: 999px;
-          background: #ff3b30;
-          color: white;
-          font-size: 12px;
-          display: grid;
-          place-items: center;
-        }
-
-        .ff-logout {
-          border-radius: 999px;
-          border: 1px solid rgba(255,255,255,0.18);
-          background: rgba(0,0,0,0.15);
-          padding: 8px 12px;
-          color: rgba(255,255,255,0.9);
-          cursor: pointer;
-        }
-
-        .ff-menu-logout {
-          margin-top: 6px;
-          border-top: 1px solid rgba(255,255,255,0.12);
-          padding-top: 12px;
-        }
-      `}</style>
-    </div>
+          <Link className={active === "subscribe" ? "ff-menu-item ff-menu-active" : "ff-menu-item"} href="/subscribe" onClick={() => setOpen(false)}>
+            Subscribe
+          </Link>
+        </nav>
+      ) : null}
+    </header>
   );
 }
