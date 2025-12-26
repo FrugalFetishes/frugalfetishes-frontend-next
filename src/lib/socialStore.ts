@@ -1,187 +1,202 @@
-"use client";
+// src/lib/socialStore.ts
+// Local-first social persistence (likes, matches, messages, notifications)
+// Safe for SSR: never touches localStorage unless in browser.
 
-type Decision = "like" | "pass";
-export type MatchSummary = {
-  matchId: string;
-  otherUserId: string;
-  createdAt: number;
+export type Match = {
+  id: string;              // matchId
+  a: string;               // uid A
+  b: string;               // uid B
+  createdAt: number;       // ms epoch
+  lastMessageAt?: number;  // ms epoch
+  lastMessageText?: string;
 };
 
-export type ChatMessage = {
+export type Message = {
   id: string;
-  fromUserId: string;
+  matchId: string;
+  from: string;           // uid
   text: string;
-  ts: number;
+  createdAt: number;      // ms epoch
 };
 
-const KEY_PREFIX = "ff_";
-const NEW_MATCH_KEY = (uid: string) => `${KEY_PREFIX}newmatches:${uid}`; // JSON string[]
-const UNREAD_KEY = (uid: string) => `${KEY_PREFIX}unread:${uid}`; // JSON Record<chatId, number>
-const MATCH_KEY = (matchId: string) => `${KEY_PREFIX}match:${matchId}`; // JSON {a,b,createdAt}
-const CHAT_KEY = (matchId: string) => `${KEY_PREFIX}chat:${matchId}`; // JSON ChatMessage[]
-const LIKE_KEY = (fromUid: string, toUid: string) => `${KEY_PREFIX}like:${fromUid}:${toUid}`; // "1"
-const PROFILE_KEY = (uid: string) => `${KEY_PREFIX}profile:${uid}`; // JSON partial profile overrides (headline/about/zip)
+type SeenState = {
+  likesGiven: Record<string, string[]>;  // uid -> [targetUid]
+  likesReceived: Record<string, string[]>; // uid -> [fromUid]
+  matches: Match[];
+  messages: Message[];
+  unreadByUser: Record<string, Record<string, number>>; // uid -> matchId -> count
+  newMatchesByUser: Record<string, number>; // uid -> count
+  profileExtrasByUser: Record<string, { headline?: string; about?: string; zip?: string }>;
+};
 
-function safeJsonParse<T>(raw: string | null, fallback: T): T {
+const KEY = "ff_social_v1";
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof localStorage !== "undefined";
+}
+
+function load(): SeenState {
+  const empty: SeenState = {
+    likesGiven: {},
+    likesReceived: {},
+    matches: [],
+    messages: [],
+    unreadByUser: {},
+    newMatchesByUser: {},
+    profileExtrasByUser: {},
+  };
+  if (!isBrowser()) return empty;
   try {
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw);
+    return { ...empty, ...parsed };
   } catch {
-    return fallback;
+    return empty;
   }
 }
 
-export function uidFromToken(token: string | null | undefined): string | null {
-  if (!token) return null;
-  const parts = token.split(".");
-  if (parts.length < 2) return null;
+function save(state: SeenState) {
+  if (!isBrowser()) return;
   try {
-    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(b64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    const payload = JSON.parse(json) as any;
-    return (
-      payload?.uid ||
-      payload?.user_id ||
-      payload?.sub ||
-      payload?.id ||
-      payload?.firebase?.identities?.email?.[0] ||
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function matchIdFor(a: string, b: string): string {
-  return [a, b].sort().join("__");
-}
-
-export function recordDecisionLocal(fromUid: string, toUid: string, decision: Decision) {
-  if (!fromUid || !toUid) return { matched: false as const, matchId: null as string | null };
-
-  if (decision === "like") {
-    localStorage.setItem(LIKE_KEY(fromUid, toUid), "1");
-
-    // Mutual like?
-    const mutual = localStorage.getItem(LIKE_KEY(toUid, fromUid)) === "1";
-    if (mutual) {
-      const matchId = matchIdFor(fromUid, toUid);
-      const existing = localStorage.getItem(MATCH_KEY(matchId));
-      if (!existing) {
-        localStorage.setItem(
-          MATCH_KEY(matchId),
-          JSON.stringify({ a: fromUid, b: toUid, createdAt: Date.now() })
-        );
-        // mark as "new match" for both users
-        addNewMatchFor(fromUid, matchId);
-        addNewMatchFor(toUid, matchId);
-      }
-      return { matched: true as const, matchId };
-    }
-  }
-
-  // pass: no-op locally
-  return { matched: false as const, matchId: null };
-}
-
-function addNewMatchFor(uid: string, matchId: string) {
-  const list = safeJsonParse<string[]>(localStorage.getItem(NEW_MATCH_KEY(uid)), []);
-  if (!list.includes(matchId)) {
-    list.unshift(matchId);
-    localStorage.setItem(NEW_MATCH_KEY(uid), JSON.stringify(list));
-  }
-}
-
-export function consumeNewMatches(uid: string): string[] {
-  const list = safeJsonParse<string[]>(localStorage.getItem(NEW_MATCH_KEY(uid)), []);
-  localStorage.setItem(NEW_MATCH_KEY(uid), JSON.stringify([]));
-  return list;
-}
-
-export function getUnreadMap(uid: string): Record<string, number> {
-  return safeJsonParse<Record<string, number>>(localStorage.getItem(UNREAD_KEY(uid)), {});
-}
-
-export function setUnreadCount(uid: string, matchId: string, count: number) {
-  const map = getUnreadMap(uid);
-  if (count <= 0) delete map[matchId];
-  else map[matchId] = count;
-  localStorage.setItem(UNREAD_KEY(uid), JSON.stringify(map));
-}
-
-export function incrementUnread(uid: string, matchId: string, delta: number) {
-  const map = getUnreadMap(uid);
-  const next = (map[matchId] || 0) + delta;
-  if (next <= 0) delete map[matchId];
-  else map[matchId] = next;
-  localStorage.setItem(UNREAD_KEY(uid), JSON.stringify(map));
-}
-
-export function badgeCounts(uid: string) {
-  const newMatches = safeJsonParse<string[]>(localStorage.getItem(NEW_MATCH_KEY(uid)), []).length;
-  const unread = Object.values(getUnreadMap(uid)).reduce((a, b) => a + b, 0);
-  return { newMatches, unreadMessages: unread };
-}
-
-export function listMatchesFor(uid: string): MatchSummary[] {
-  const out: MatchSummary[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (!k || !k.startsWith(`${KEY_PREFIX}match:`)) continue;
-    const matchId = k.substring(`${KEY_PREFIX}match:`.length);
-    const raw = localStorage.getItem(k);
-    const m = safeJsonParse<any>(raw, null);
-    if (!m) continue;
-    if (m.a === uid || m.b === uid) {
-      const other = m.a === uid ? m.b : m.a;
-      out.push({ matchId, otherUserId: other, createdAt: m.createdAt || 0 });
-    }
-  }
-  out.sort((a, b) => b.createdAt - a.createdAt);
-  return out;
-}
-
-export function getChat(matchId: string): ChatMessage[] {
-  return safeJsonParse<ChatMessage[]>(localStorage.getItem(CHAT_KEY(matchId)), []);
-}
-
-export function addChatMessage(matchId: string, msg: Omit<ChatMessage, "id" | "ts">) {
-  const list = getChat(matchId);
-  const next: ChatMessage = { id: crypto.randomUUID(), ts: Date.now(), ...msg };
-  list.push(next);
-  localStorage.setItem(CHAT_KEY(matchId), JSON.stringify(list));
-  return next;
-}
-
-export function clearUnreadForChat(uid: string, matchId: string) {
-  setUnreadCount(uid, matchId, 0);
-}
-
-export function getProfileExtras(uid: string): { headline?: string; about?: string; zip?: string } {
-  return safeJsonParse<any>(localStorage.getItem(PROFILE_KEY(uid)), {});
-}
-
-export function setProfileExtras(uid: string, extras: { headline?: string; about?: string; zip?: string }) {
-  const cur = getProfileExtras(uid);
-  const next = { ...cur, ...extras };
-  localStorage.setItem(PROFILE_KEY(uid), JSON.stringify(next));
-}
-
-
-const USER_PROFILE_KEY = (uid: string) => `${KEY_PREFIX}userprofile:${uid}`; // JSON snapshot
-
-export function saveUserProfileSnapshot(uid: string, profile: any) {
-  if (!uid) return;
-  try {
-    localStorage.setItem(USER_PROFILE_KEY(uid), JSON.stringify(profile));
+    localStorage.setItem(KEY, JSON.stringify(state));
   } catch {}
 }
 
-export function loadUserProfileSnapshot(uid: string): any | null {
-  return safeJsonParse<any>(localStorage.getItem(USER_PROFILE_KEY(uid)), null);
+function uniqPush(arr: string[], v: string) {
+  if (!arr.includes(v)) arr.push(v);
+}
+
+export function uidFromSessionToken(token: string | null): string | null {
+  // We do NOT verify token here (client-side).
+  // We only want a stable key per user to scope local storage.
+  if (!token) return null;
+  try {
+    // JWT format: header.payload.signature
+    const parts = token.split(".");
+    if (parts.length >= 2) {
+      const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      const json = JSON.parse(atob(payload));
+      // common fields: user_id, uid, sub
+      return (json.user_id || json.uid || json.sub || null) as string | null;
+    }
+  } catch {}
+  // fallback: hash-ish
+  return "tok_" + token.slice(0, 12);
+}
+
+export function getBadges(uid: string) {
+  const s = load();
+  const matchCount = s.newMatchesByUser[uid] || 0;
+  const unread = s.unreadByUser[uid] || {};
+  const msgCount = Object.values(unread).reduce((a, b) => a + (b || 0), 0);
+  return {
+    total: matchCount + msgCount,
+    matches: matchCount,
+    messages: msgCount,
+  };
+}
+
+export function clearNewMatches(uid: string) {
+  const s = load();
+  s.newMatchesByUser[uid] = 0;
+  save(s);
+}
+
+export function clearUnreadForMatch(uid: string, matchId: string) {
+  const s = load();
+  if (!s.unreadByUser[uid]) s.unreadByUser[uid] = {};
+  s.unreadByUser[uid][matchId] = 0;
+  save(s);
+}
+
+export function getMatchesFor(uid: string): Match[] {
+  const s = load();
+  return s.matches
+    .filter((m) => m.a === uid || m.b === uid)
+    .sort((x, y) => (y.lastMessageAt || y.createdAt) - (x.lastMessageAt || x.createdAt));
+}
+
+export function getMessages(matchId: string): Message[] {
+  const s = load();
+  return s.messages
+    .filter((m) => m.matchId === matchId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function sendMessage(matchId: string, fromUid: string, toUid: string, text: string) {
+  const s = load();
+  const msg: Message = {
+    id: "m_" + Math.random().toString(36).slice(2),
+    matchId,
+    from: fromUid,
+    text,
+    createdAt: Date.now(),
+  };
+  s.messages.push(msg);
+
+  const m = s.matches.find((mm) => mm.id === matchId);
+  if (m) {
+    m.lastMessageAt = msg.createdAt;
+    m.lastMessageText = text.slice(0, 80);
+  }
+
+  if (!s.unreadByUser[toUid]) s.unreadByUser[toUid] = {};
+  s.unreadByUser[toUid][matchId] = (s.unreadByUser[toUid][matchId] || 0) + 1;
+
+  save(s);
+}
+
+export function getProfileExtras(uid: string) {
+  const s = load();
+  return s.profileExtrasByUser[uid] || {};
+}
+
+export function setProfileExtras(uid: string, extras: { headline?: string; about?: string; zip?: string }) {
+  const s = load();
+  s.profileExtrasByUser[uid] = { ...(s.profileExtrasByUser[uid] || {}), ...extras };
+  save(s);
+}
+
+// Like logic: if B already liked A, create match
+export function like(targetUid: string, myUid: string): { matched: boolean; matchId?: string } {
+  const s = load();
+  if (!s.likesGiven[myUid]) s.likesGiven[myUid] = [];
+  if (!s.likesReceived[targetUid]) s.likesReceived[targetUid] = [];
+  uniqPush(s.likesGiven[myUid], targetUid);
+  uniqPush(s.likesReceived[targetUid], myUid);
+
+  const otherLikedMe = (s.likesGiven[targetUid] || []).includes(myUid);
+  if (otherLikedMe) {
+    const matchId = "match_" + [myUid, targetUid].sort().join("_");
+    const exists = s.matches.some((m) => m.id === matchId);
+    if (!exists) {
+      s.matches.push({
+        id: matchId,
+        a: [myUid, targetUid].sort()[0],
+        b: [myUid, targetUid].sort()[1],
+        createdAt: Date.now(),
+      });
+      s.newMatchesByUser[myUid] = (s.newMatchesByUser[myUid] || 0) + 1;
+      s.newMatchesByUser[targetUid] = (s.newMatchesByUser[targetUid] || 0) + 1;
+    }
+    save(s);
+    return { matched: true, matchId };
+  }
+
+  save(s);
+  return { matched: false };
+}
+
+export function pass(targetUid: string, myUid: string) {
+  // For now, we do nothing besides not creating matches.
+  // (If you want, we can store passes to avoid resurfacing locally.)
+  void targetUid;
+  void myUid;
+}
+
+export function resetAllSocial() {
+  // Safety: only run in browser
+  if (!isBrowser()) return;
+  localStorage.removeItem(KEY);
 }
