@@ -134,7 +134,7 @@ export default function ChatPage() {
 
   return (
     <div className="ff-page">
-      <AppHeader active="chat" />
+      <AppHeader active="messages" />
 
       <main className="ff-shell">
         <div className="ff-chat-top">
