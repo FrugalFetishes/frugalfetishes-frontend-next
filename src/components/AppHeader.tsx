@@ -22,9 +22,13 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
     }
   }, []);
 
+  // uid is derived inside badgeCounts via localStorage keys, but for safety we refresh counts by scanning
   useEffect(() => {
     const tick = () => {
       try {
+        // badgeCounts uses uid keys; we store by uid in socialStore, so we need uid in localStorage to exist.
+        // In practice, token->uid is used by pages that create matches/messages. Here we just refresh.
+        // Pages will write the keys; we just compute.
         const uid = (() => {
           try {
             const parts = String(token || "").split(".");
@@ -42,12 +46,7 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
             return "anon";
           }
         })();
-
-        const raw = badgeCounts(uid);
-        setCounts({
-          newMatches: raw.matches,
-          unreadMessages: raw.messages,
-        });
+        setCounts(badgeCounts(uid));
       } catch {}
     };
     tick();
@@ -73,7 +72,11 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
 
   return (
     <header className="ff-header">
-      <button className="ff-hamburger" aria-label="Menu" onClick={() => setOpen((v) => !v)}>
+      <button
+        className="ff-hamburger"
+        aria-label="Menu"
+        onClick={() => setOpen((v) => !v)}
+      >
         <span className="ff-ham-line" />
         <span className="ff-ham-line" />
         <span className="ff-ham-line" />
@@ -85,19 +88,28 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
       </div>
 
       <div className="ff-header-right">
-        <button className="ff-pill" onClick={onLogout}>Logout</button>
+        <button className="ff-pill" onClick={onLogout}>
+          Logout
+        </button>
       </div>
 
       {open ? (
         <div className="ff-menu" role="menu" aria-label="Main menu">
           {items.map((it) => (
-            <Link key={it.href} className="ff-menu-item" href={it.href} onClick={() => setOpen(false)}>
+            <Link
+              key={it.href}
+              className="ff-menu-item"
+              href={it.href}
+              onClick={() => setOpen(false)}
+            >
               <span>{it.label}</span>
               {it.badge ? <span className="ff-badge ff-badge-sm">{it.badge}</span> : null}
             </Link>
           ))}
           <div className="ff-menu-divider" />
-          <button className="ff-menu-item" onClick={onLogout}><span>Logout</span></button>
+          <button className="ff-menu-item" onClick={onLogout}>
+            <span>Logout</span>
+          </button>
         </div>
       ) : null}
     </header>
