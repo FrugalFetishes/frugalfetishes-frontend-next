@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import { requireSession } from "@/lib/session";
-import {
-  uidFromToken,
-  loadUserProfileSnapshot,
-  getProfileExtras,
-  setProfileExtras,
-} from "@/lib/socialStore";
+import { uidFromToken, loadUserProfileSnapshot } from "@/lib/socialStore";
+
+function fallbackNameFromUid(u: string): string {
+  if (!u) return "Match";
+  if (u.includes("@")) return u.split("@")[0] || u;
+  return u.slice(0, 8);
+}
 
 export default function MatchProfilePage() {
   const params = useParams<{ id: string }>();
@@ -21,88 +23,52 @@ export default function MatchProfilePage() {
   }, []);
   const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
 
-  // matchId is "a__b"
   const otherUid = useMemo(() => {
     const parts = String(matchId).split("__");
     if (parts.length !== 2) return "";
     return parts[0] === uid ? parts[1] : parts[0];
   }, [matchId, uid]);
 
-  const p = useMemo(() => loadUserProfileSnapshot(otherUid), [otherUid]);
-  const extrasKey = otherUid;
-  const [extras, setExtras] = useState(() => getProfileExtras(extrasKey));
+  const p: any = useMemo(() => (otherUid ? loadUserProfileSnapshot(otherUid) : null), [otherUid]);
+
+  const name =
+    p?.name ||
+    p?.displayName ||
+    p?.username ||
+    p?.email ||
+    fallbackNameFromUid(otherUid);
 
   const photo =
     p?.photoUrl ||
     p?.profilePhotoUrl ||
-    p?.imageUrl ||
     p?.avatarUrl ||
+    p?.imageUrl ||
     "/frugalfetishes.png";
 
-  const name = p?.name || otherUid || "Profile";
-  const age = typeof p?.age === "number" ? p.age : null;
-  const city = p?.city || "";
-
-  function onSaveExtras() {
-    setProfileExtras(extrasKey, extras);
-    alert("Saved (local for now).");
-  }
+  const headline = p?.headline || "Short headline shown on profile — edit in Profile.";
 
   return (
     <div className="ff-page">
-      <AppHeader active="profile" />
+      <AppHeader active="matches" />
 
       <main className="ff-shell">
-        <button className="ff-pill" onClick={() => router.back()}>Back</button>
-
-        <div className="ff-profile">
-          <img className="ff-profile-img" src={photo} alt={name} />
-          <div className="ff-profile-top">
-            <div className="ff-profile-name">
-              {name}{age ? `, ${age}` : ""} {city ? <span className="ff-muted">• {city}</span> : null}
-            </div>
-
-            <div className="ff-muted">{extras.headline || "Headline (tap to edit below)"}</div>
-
-            <button className="ff-pill" onClick={() => router.push(`/chat/${matchId}`)}>
-              Message
-            </button>
-          </div>
+        <div className="ff-chat-top">
+          <button className="ff-pill" onClick={() => router.back()}>Back</button>
+          <div className="ff-chat-title">{name}</div>
+          <Link className="ff-pill" href="/matches">Matches</Link>
         </div>
 
-        <div className="ff-card">
-          <div className="ff-field">
-            <label className="ff-label">Headline</label>
-            <input
-              className="ff-input"
-              value={extras.headline || ""}
-              onChange={(e) => setExtras((x) => ({ ...x, headline: e.target.value }))}
-              placeholder="Short headline shown on profile + feed"
-            />
-          </div>
+        <div className="ff-profile">
+          <img className="ff-profile-hero" src={photo} alt={name} />
+          <div className="ff-profile-card">
+            <div className="ff-h2">{name}</div>
+            <div className="ff-muted">{headline}</div>
 
-          <div className="ff-field">
-            <label className="ff-label">About Me</label>
-            <textarea
-              className="ff-textarea"
-              value={extras.about || ""}
-              onChange={(e) => setExtras((x) => ({ ...x, about: e.target.value }))}
-              placeholder="A longer summary / bio"
-              rows={6}
-            />
-          </div>
+            <div style={{ height: 12 }} />
 
-          <div className="ff-field">
-            <label className="ff-label">Zip Code</label>
-            <input
-              className="ff-input"
-              value={extras.zip || ""}
-              onChange={(e) => setExtras((x) => ({ ...x, zip: e.target.value }))}
-              placeholder="Used later for 60-mile local matching + admin cluster metrics"
-            />
+            {/* Always show Message so you can test chat */}
+            <Link className="ff-pill" href={`/chat/${matchId}`}>Message</Link>
           </div>
-
-          <button className="ff-pill" onClick={onSaveExtras}>Save</button>
         </div>
       </main>
     </div>
