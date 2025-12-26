@@ -46,7 +46,13 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
             return "anon";
           }
         })();
-        setCounts(badgeCounts(uid));
+        {
+        const raw: any = badgeCounts(uid);
+        setCounts({
+          newMatches: Number(raw?.newMatches ?? raw?.matches ?? 0),
+          unreadMessages: Number(raw?.unreadMessages ?? raw?.messages ?? 0),
+        });
+      }
       } catch {}
     };
     tick();
