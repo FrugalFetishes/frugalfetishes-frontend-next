@@ -1,33 +1,43 @@
-const KEY = "ff_session";
+// src/lib/session.ts
+"use client";
+
+// Minimal session utilities for client-side auth token storage.
+// This file provides COMPAT exports for older imports (readSession, requireSession).
+
+const KEY = "ff_session_token_v1";
 
 export function saveSession(token: string) {
-  localStorage.setItem(KEY, token);
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(KEY, token);
+  } catch {}
 }
 
 export function loadSession(): string | null {
-  return localStorage.getItem(KEY);
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function clearSession() {
-  localStorage.removeItem(KEY);
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(KEY);
+  } catch {}
 }
 
-/**
- * Client-side auth guard.
- * Returns the stored token (string) or redirects to /login and returns null.
- *
- * Use inside client components:
- *   const token = requireSession();
- *   if (!token) return null;
- */
-export function requireSession(): string | null {
-  // localStorage only exists in the browser
-  if (typeof window === "undefined") return null;
+// ---- COMPAT EXPORTS ----
 
-  const token = loadSession();
-  if (!token) {
-    window.location.href = "/login";
-    return null;
-  }
-  return token;
+// Some pages import readSession()
+export function readSession(): string | null {
+  return loadSession();
+}
+
+// Some pages import requireSession() which should redirect in the caller.
+// We return token or null; caller decides redirect.
+export function requireSession(): string | null {
+  return loadSession();
 }
