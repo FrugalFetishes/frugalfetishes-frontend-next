@@ -26,9 +26,6 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
   useEffect(() => {
     const tick = () => {
       try {
-        // badgeCounts uses uid keys; we store by uid in socialStore, so we need uid in localStorage to exist.
-        // In practice, token->uid is used by pages that create matches/messages. Here we just refresh.
-        // Pages will write the keys; we just compute.
         const uid = (() => {
           try {
             const parts = String(token || "").split(".");
@@ -46,13 +43,7 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
             return "anon";
           }
         })();
-        {
-        const raw: any = badgeCounts(uid);
-        setCounts({
-          newMatches: Number(raw?.newMatches ?? raw?.matches ?? 0),
-          unreadMessages: Number(raw?.unreadMessages ?? raw?.messages ?? 0),
-        });
-      }
+        setCounts(badgeCounts(uid));
       } catch {}
     };
     tick();
@@ -78,11 +69,7 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
 
   return (
     <header className="ff-header">
-      <button
-        className="ff-hamburger"
-        aria-label="Menu"
-        onClick={() => setOpen((v) => !v)}
-      >
+      <button className="ff-hamburger" aria-label="Menu" onClick={() => setOpen((v) => !v)}>
         <span className="ff-ham-line" />
         <span className="ff-ham-line" />
         <span className="ff-ham-line" />
@@ -94,6 +81,18 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
       </div>
 
       <div className="ff-header-right">
+        <Link className="ff-pill" href="/matches" aria-label="Matches">
+          Matches
+          {counts.newMatches > 0 ? <span className="ff-badge ff-badge-sm">{counts.newMatches}</span> : null}
+        </Link>
+
+        <Link className="ff-pill" href="/chat/inbox" aria-label="Messages">
+          Messages
+          {counts.unreadMessages > 0 ? (
+            <span className="ff-badge ff-badge-sm">{counts.unreadMessages}</span>
+          ) : null}
+        </Link>
+
         <button className="ff-pill" onClick={onLogout}>
           Logout
         </button>
@@ -102,12 +101,7 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
       {open ? (
         <div className="ff-menu" role="menu" aria-label="Main menu">
           {items.map((it) => (
-            <Link
-              key={it.href}
-              className="ff-menu-item"
-              href={it.href}
-              onClick={() => setOpen(false)}
-            >
+            <Link key={it.href} className="ff-menu-item" href={it.href} onClick={() => setOpen(false)}>
               <span>{it.label}</span>
               {it.badge ? <span className="ff-badge ff-badge-sm">{it.badge}</span> : null}
             </Link>
