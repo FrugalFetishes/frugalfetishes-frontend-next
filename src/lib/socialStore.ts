@@ -1,6 +1,8 @@
 // src/lib/socialStore.ts
 // Local-first social persistence (likes, matches, messages, notifications)
-// Safe for SSR: never touches localStorage unless in browser.
+// SSR-safe: never touches localStorage unless in browser.
+// This file also provides COMPAT exports (badgeCounts, uidFromToken, getChat, addChatMessage, incrementUnread)
+// to match existing imports across the app.
 
 export type Match = {
   id: string;              // matchId
@@ -68,20 +70,15 @@ function uniqPush(arr: string[], v: string) {
 }
 
 export function uidFromSessionToken(token: string | null): string | null {
-  // We do NOT verify token here (client-side).
-  // We only want a stable key per user to scope local storage.
   if (!token) return null;
   try {
-    // JWT format: header.payload.signature
     const parts = token.split(".");
     if (parts.length >= 2) {
       const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
       const json = JSON.parse(atob(payload));
-      // common fields: user_id, uid, sub
       return (json.user_id || json.uid || json.sub || null) as string | null;
     }
   } catch {}
-  // fallback: hash-ish
   return "tok_" + token.slice(0, 12);
 }
 
@@ -90,11 +87,7 @@ export function getBadges(uid: string) {
   const matchCount = s.newMatchesByUser[uid] || 0;
   const unread = s.unreadByUser[uid] || {};
   const msgCount = Object.values(unread).reduce((a, b) => a + (b || 0), 0);
-  return {
-    total: matchCount + msgCount,
-    matches: matchCount,
-    messages: msgCount,
-  };
+  return { total: matchCount + msgCount, matches: matchCount, messages: msgCount };
 }
 
 export function clearNewMatches(uid: string) {
@@ -126,6 +119,7 @@ export function getMessages(matchId: string): Message[] {
 
 export function sendMessage(matchId: string, fromUid: string, toUid: string, text: string) {
   const s = load();
+
   const msg: Message = {
     id: "m_" + Math.random().toString(36).slice(2),
     matchId,
@@ -145,6 +139,7 @@ export function sendMessage(matchId: string, fromUid: string, toUid: string, tex
   s.unreadByUser[toUid][matchId] = (s.unreadByUser[toUid][matchId] || 0) + 1;
 
   save(s);
+  return msg;
 }
 
 export function getProfileExtras(uid: string) {
@@ -171,12 +166,8 @@ export function like(targetUid: string, myUid: string): { matched: boolean; matc
     const matchId = "match_" + [myUid, targetUid].sort().join("_");
     const exists = s.matches.some((m) => m.id === matchId);
     if (!exists) {
-      s.matches.push({
-        id: matchId,
-        a: [myUid, targetUid].sort()[0],
-        b: [myUid, targetUid].sort()[1],
-        createdAt: Date.now(),
-      });
+      const [a, b] = [myUid, targetUid].sort();
+      s.matches.push({ id: matchId, a, b, createdAt: Date.now() });
       s.newMatchesByUser[myUid] = (s.newMatchesByUser[myUid] || 0) + 1;
       s.newMatchesByUser[targetUid] = (s.newMatchesByUser[targetUid] || 0) + 1;
     }
@@ -188,15 +179,45 @@ export function like(targetUid: string, myUid: string): { matched: boolean; matc
   return { matched: false };
 }
 
-export function pass(targetUid: string, myUid: string) {
-  // For now, we do nothing besides not creating matches.
-  // (If you want, we can store passes to avoid resurfacing locally.)
-  void targetUid;
-  void myUid;
+export function pass(_targetUid: string, _myUid: string) {
+  // no-op for now
 }
 
 export function resetAllSocial() {
-  // Safety: only run in browser
   if (!isBrowser()) return;
   localStorage.removeItem(KEY);
+}
+
+/* =========================
+   COMPAT EXPORTS (for existing imports)
+   ========================= */
+
+// AppHeader.tsx expects badgeCounts()
+export function badgeCounts(uid: string) {
+  return getBadges(uid);
+}
+
+// chat/[id]/page.tsx expects uidFromToken()
+export function uidFromToken(token: string | null) {
+  return uidFromSessionToken(token);
+}
+
+// chat expects getChat() + addChatMessage() + incrementUnread()
+export function getChat(matchId: string) {
+  return getMessages(matchId);
+}
+
+export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string) {
+  return sendMessage(matchId, fromUid, toUid, text);
+}
+
+export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
+  const s = load();
+  if (!s.unreadByUser[uid]) s.unreadByUser[uid] = {};
+  s.unreadByUser[uid][matchId] = (s.unreadByUser[uid][matchId] || 0) + amount;
+  save(s);
+}
+
+export function markChatRead(uid: string, matchId: string) {
+  clearUnreadForMatch(uid, matchId);
 }
