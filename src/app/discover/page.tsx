@@ -387,6 +387,17 @@ export default function DiscoverPage() {
     touchAction: 'none',
   };
 
+  const photoStyle: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    borderRadius: 28,
+    userSelect: 'none',
+    pointerEvents: 'none',
+  };
+
   const overlayPill: React.CSSProperties = {
     position: 'absolute',
     top: 18,
