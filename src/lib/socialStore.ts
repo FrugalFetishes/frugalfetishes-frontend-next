@@ -207,34 +207,41 @@ export function getChat(matchId: string) {
   return getMessages(matchId);
 }
 
-export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string): ReturnType<typeof sendMessage>;
-export function addChatMessage(matchId: string, msg: { fromUserId: string; text: string; toUserId?: string }): ReturnType<typeof sendMessage>;
+export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string): Message | null;
 export function addChatMessage(
   matchId: string,
-  a: string | { fromUserId: string; text: string; toUserId?: string },
-  b?: string,
-  c?: string
-) {
-  // Back-compat: allow old call shape addChatMessage(matchId, { fromUserId, text })
-  if (typeof a === "object" && a) {
-    const fromUid = a.fromUserId;
-    const text = a.text;
-    let toUid = a.toUserId;
-
-    if (!toUid) {
-      const s = load();
-      const m = s.matches.find((mm) => mm.id === matchId);
-      if (m) toUid = m.a === fromUid ? m.b : m.a;
-    }
-
-    // If we still can't resolve, fall back to a no-op message send with empty toUid,
-    // but keep app alive (UI will still show the message locally).
-    return sendMessage(matchId, fromUid, toUid || "", text);
+  payload: { fromUserId: string; text: string; toUserId?: string }
+): Message | null;
+export function addChatMessage(matchId: string, a: any, b?: any, c?: any): Message | null {
+  // Supports both:
+  // 1) addChatMessage(matchId, fromUid, toUid, text)
+  // 2) addChatMessage(matchId, { fromUserId, text, toUserId? })
+  if (typeof a === "string") {
+    const fromUid = a;
+    const toUid = String(b || "");
+    const text = String(c || "");
+    if (!fromUid || !toUid || !text) return null;
+    return sendMessage(matchId, fromUid, toUid, text);
   }
 
-  // New call shape: addChatMessage(matchId, fromUid, toUid, text)
-  return sendMessage(matchId, a, b || "", c || "");
+  const payload = a as { fromUserId?: string; text?: string; toUserId?: string };
+  const fromUid = payload?.fromUserId || "";
+  const text = payload?.text || "";
+  if (!fromUid || !text) return null;
+
+  // Infer recipient from match record if not provided
+  const s = load();
+  const m = s.matches.find((mm) => mm.id === matchId);
+  const inferredToUid =
+    payload?.toUserId ||
+    (m ? (m.a === fromUid ? m.b : m.b === fromUid ? m.a : "") : "");
+
+  if (!inferredToUid) return null;
+
+  // Note: sendMessage() does its own load/save, so we don't mutate the loaded state here.
+  return sendMessage(matchId, fromUid, inferredToUid, text);
 }
+
 
 export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
   const s = load();
