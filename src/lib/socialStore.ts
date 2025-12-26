@@ -64,7 +64,6 @@ function setStoredUid(uid: string) {
   try {
     localStorage.setItem(UID_KEY, uid);
   } catch {}
-} catch {}
 }
 
 
