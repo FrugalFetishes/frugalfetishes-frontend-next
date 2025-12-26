@@ -1,114 +1,92 @@
-// src/app/matches/page.tsx
-"use client";
+'use client';
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { loadMatches, clearMatches, type StoredMatch } from "@/lib/matchesStore";
+import { getCurrentUserKey, getMatches, markAllMatchesSeen, getUnseenMatchesCount } from "@/lib/socialStore";
 
 export default function MatchesPage() {
-  const [items, setItems] = useState<StoredMatch[]>([]);
+  const [userKey, setUserKey] = useState<string | null>(null);
+  const [unseen, setUnseen] = useState(0);
 
   useEffect(() => {
-    setItems(loadMatches());
+    const k = getCurrentUserKey();
+    setUserKey(k);
+    setUnseen(getUnseenMatchesCount(k));
+    // When user opens Matches, clear the badge
+    markAllMatchesSeen(k);
+    setUnseen(0);
   }, []);
 
-  const has = items.length > 0;
-
-  const list = useMemo(() => items, [items]);
+  const matches = useMemo(() => getMatches(userKey), [userKey]);
 
   return (
-    <main style={{ padding: 20, maxWidth: 980, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <h1 style={{ margin: 0 }}>Matches</h1>
-
-        <button
-          type="button"
-          onClick={() => {
-            clearMatches();
-            setItems([]);
-          }}
-          style={{
-            marginLeft: "auto",
-            borderRadius: 999,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(0,0,0,0.25)",
-            color: "#fff",
-            padding: "8px 12px",
-            cursor: "pointer",
-          }}
-          aria-label="Clear matches (dev)"
-          title="Dev: clear matches"
-        >
-          Clear
-        </button>
-
-        <Link
-          href="/discover"
-          style={{
-            borderRadius: 999,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(0,0,0,0.25)",
-            color: "#fff",
-            padding: "8px 12px",
-            textDecoration: "none",
-          }}
-        >
-          Back
-        </Link>
+    <div style={{ minHeight: "100vh", padding: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+        <h1 style={{ margin: 0, fontSize: 28, letterSpacing: 0.2 }}>Matches</h1>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <Link
+            href="/discover"
+            style={{
+              position: "relative",
+              padding: "8px 12px",
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(0,0,0,0.28)",
+              color: "#fff",
+              textDecoration: "none",
+              fontWeight: 700,
+            }}
+          >
+            Back
+          </Link>
+        </div>
       </div>
 
-      {!has ? (
-        <div
-          style={{
-            padding: 14,
-            borderRadius: 14,
-            border: "1px solid rgba(255,255,255,0.12)",
-            background: "rgba(0,0,0,0.20)",
-            color: "rgba(255,255,255,0.85)",
-          }}
-        >
-          No matches yet. Like someone in Discover to create one.
+      {!userKey && (
+        <div style={{ opacity: 0.85, padding: 14, borderRadius: 16, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(0,0,0,0.28)" }}>
+          Log in again (we need your email stored) to see matches.
         </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-          {list.map((m) => (
+      )}
+
+      {userKey && matches.length === 0 && (
+        <div style={{ opacity: 0.85, padding: 14, borderRadius: 16, border: "1px solid rgba(255,255,255,0.14)", background: "rgba(0,0,0,0.28)" }}>
+          No matches yet. Like someone in Discover and have them like you back.
+        </div>
+      )}
+
+      {userKey && matches.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14, marginTop: 12 }}>
+          {matches.map((m) => (
             <Link
               key={m.id}
               href={`/matches/${encodeURIComponent(m.id)}`}
               style={{
-                display: "block",
-                borderRadius: 18,
-                overflow: "hidden",
-                border: "1px solid rgba(255,255,255,0.14)",
-                background: "rgba(0,0,0,0.22)",
                 textDecoration: "none",
                 color: "#fff",
+                borderRadius: 18,
+                border: "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(0,0,0,0.28)",
+                overflow: "hidden",
               }}
             >
-              <div style={{ aspectRatio: "4/5", background: "rgba(255,255,255,0.06)", position: "relative" }}>
+              <div style={{ width: "100%", aspectRatio: "4 / 5", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {m.photoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={m.photoUrl}
-                    alt={`${m.name}'s photo`}
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
+                  <img src={m.photoUrl} alt={m.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 ) : (
-                  <div style={{ padding: 14, color: "rgba(255,255,255,0.75)" }}>No photo</div>
+                  <div style={{ opacity: 0.75, fontWeight: 700 }}>No photo</div>
                 )}
               </div>
-
               <div style={{ padding: 12 }}>
-                <div style={{ fontWeight: 700 }}>{m.name}{typeof m.age === "number" ? `, ${m.age}` : ""}</div>
-                <div style={{ opacity: 0.75, fontSize: 13 }}>{m.city ?? ""}</div>
-                <div style={{ opacity: 0.55, fontSize: 12, marginTop: 6 }}>
-                  Matched {new Date(m.matchedAt).toLocaleString()}
+                <div style={{ fontWeight: 900, fontSize: 16, letterSpacing: 0.2 }}>
+                  {m.name}{m.age ? `, ${m.age}` : ""}
                 </div>
+                <div style={{ opacity: 0.85, fontSize: 13, marginTop: 4 }}>{m.city || ""}</div>
               </div>
             </Link>
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }
