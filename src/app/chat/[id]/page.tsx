@@ -1,132 +1,134 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
-import { apiGet, apiPost } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import AppHeader from "@/components/AppHeader";
+import { requireSession } from "@/lib/session";
+import {
+  uidFromToken,
+  getChat,
+  addChatMessage,
+  incrementUnread,
+  clearUnreadForChat,
+  loadUserProfileSnapshot,
+} from "@/lib/socialStore";
 
-type Msg = {
-  id?: string;
-  text: string;
-  from?: string;
-  createdAt?: string;
-};
+type Row =
+  | { kind: "date"; id: string; label: string }
+  | { kind: "msg"; id: string; from: string; text: string; ts: number };
+
+function fmtDate(ts: number) {
+  try {
+    return new Date(ts).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function fmtTime(ts: number) {
+  try {
+    return new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
 
 export default function ChatPage() {
   const params = useParams<{ id: string }>();
-  const id = params?.id;
+  const router = useRouter();
+  const matchId = params?.id || "";
 
-  const [loading, setLoading] = useState(true);
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const token = useMemo(() => {
+    try { return requireSession(); } catch { return null as any; }
+  }, []);
+  const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
+
+  const otherUid = useMemo(() => {
+    const parts = String(matchId).split("__");
+    if (parts.length !== 2) return "";
+    return parts[0] === uid ? parts[1] : parts[0];
+  }, [matchId, uid]);
+
+  const other = useMemo(() => loadUserProfileSnapshot(otherUid), [otherUid]);
+  const otherName = other?.name || otherUid || "Chat";
+
   const [text, setText] = useState("");
-  const [status, setStatus] = useState("");
-
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [rows, setRows] = useState<Row[]>([]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await apiGet(`/api/chat/${id}`);
-        const list = Array.isArray(res?.messages) ? res.messages : Array.isArray(res) ? res : [];
-        setMsgs(list);
-      } catch (e: any) {
-        setStatus(e?.message ? String(e.message) : "Failed to load chat.");
-      } finally {
-        setLoading(false);
+    // opening chat clears unread badge for this thread
+    try { clearUnreadForChat(uid, matchId); } catch {}
+
+    const buildRows = () => {
+      const msgs = getChat(matchId);
+      const out: Row[] = [];
+      let lastDay = "";
+      for (const m of msgs) {
+        const day = fmtDate(m.ts);
+        if (day && day !== lastDay) {
+          lastDay = day;
+          out.push({ kind: "date", id: `d:${day}`, label: day });
+        }
+        out.push({ kind: "msg", id: m.id, from: m.fromUserId, text: m.text, ts: m.ts });
       }
-    })();
-  }, [id]);
+      setRows(out);
+    };
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [msgs.length]);
+    buildRows();
+    const id = window.setInterval(buildRows, 700);
+    return () => window.clearInterval(id);
+  }, [uid, matchId]);
 
-  async function send() {
+  function onSend() {
     const t = text.trim();
     if (!t) return;
-    setText("");
-    try {
-      const res: any = await apiPost(`/api/chat/${id}`, { text: t });
-      const msg = res?.message || res;
-      if (msg) setMsgs((prev) => [...prev, msg]);
-    } catch (e: any) {
-      setStatus(e?.message ? String(e.message) : "Failed to send.");
-    }
-  }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") send();
+    addChatMessage(matchId, { fromUserId: uid, text: t });
+    // mark unread for the other user (local)
+    if (otherUid) incrementUnread(otherUid, matchId, 1);
+    setText("");
   }
 
   return (
-    <div style={{ padding: 18, display: "grid", placeItems: "center" }}>
-      <div style={{ width: "min(820px, 92vw)" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
-          <h1 style={{ margin: 0 }}>Chat</h1>
-          <div style={{ opacity: 0.75, fontSize: 13 }}>{status || (loading ? "Loading…" : "")}</div>
+    <div className="ff-page">
+      <AppHeader active="chat" />
+
+      <main className="ff-shell">
+        <div className="ff-chat-top">
+          <button className="ff-pill" onClick={() => router.back()}>Back</button>
+          <div className="ff-chat-title">{otherName}</div>
+          <Link className="ff-pill" href="/matches">Matches</Link>
         </div>
 
-        <div className="panel" style={{ height: "68vh", minHeight: 420, display: "grid", gridTemplateRows: "1fr auto" }}>
-          <div style={{ overflow: "auto", padding: 14, display: "grid", gap: 10 }}>
-            {loading ? (
-              <div style={{ opacity: 0.85 }}>Loading…</div>
-            ) : msgs.length === 0 ? (
-              <div style={{ opacity: 0.85 }}>No messages yet. Say hi.</div>
-            ) : (
-              msgs.map((m, i) => (
-                <div
-                  key={m.id || i}
-                  style={{
-                    maxWidth: "78%",
-                    justifySelf: m.from === "me" ? "end" : "start",
-                    padding: "10px 12px",
-                    borderRadius: 16,
-                    border: "1px solid rgba(255,255,255,.10)",
-                    background:
-                      m.from === "me"
-                        ? "radial-gradient(300px 140px at 30% 50%, rgba(255,79,174,.22), transparent 60%), rgba(255,255,255,.06)"
-                        : "rgba(255,255,255,.06)",
-                  }}
-                >
-                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{m.text}</div>
+        <div className="ff-chat">
+          {rows.length === 0 ? (
+            <div className="ff-muted">No messages yet. Say hi.</div>
+          ) : (
+            rows.map((r) =>
+              r.kind === "date" ? (
+                <div key={r.id} className="ff-chat-date">{r.label}</div>
+              ) : (
+                <div key={r.id} className={r.from === uid ? "ff-bubble ff-bubble-me" : "ff-bubble"}>
+                  <div className="ff-bubble-text">{r.text}</div>
+                  <div className="ff-bubble-time">{fmtTime(r.ts)}</div>
                 </div>
-              ))
-            )}
-            <div ref={bottomRef} />
-          </div>
-
-          <div style={{ padding: 12, borderTop: "1px solid rgba(255,255,255,.08)", display: "grid", gap: 10 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
-              <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder="Message…"
-                style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  borderRadius: 16,
-                  border: "1px solid rgba(255,255,255,.12)",
-                  background: "rgba(0,0,0,.25)",
-                  color: "var(--text)",
-                }}
-              />
-              <button className="pillBtn" onClick={send}>
-                Send
-              </button>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link className="pillBtn" href={`/matches/${id}`}>
-                Profile
-              </Link>
-              <Link className="pillBtn" href="/matches">
-                Matches
-              </Link>
-            </div>
-          </div>
+              )
+            )
+          )}
         </div>
-      </div>
+
+        <div className="ff-chat-input">
+          <input
+            className="ff-input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Message…"
+            onKeyDown={(e) => { if (e.key === "Enter") onSend(); }}
+          />
+          <button className="ff-pill" onClick={onSend}>Send</button>
+        </div>
+      </main>
     </div>
   );
 }
