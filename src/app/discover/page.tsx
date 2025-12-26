@@ -127,6 +127,9 @@ export default function DiscoverPage() {
   const [busy, setBusy] = useState(false);
   const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
 
+  // UI expects `loading` for the card stack; our state flag is `busy`.
+  const loading = busy;
+
   const drag = useRef({ active: false, x0: 0, y0: 0, dx: 0, dy: 0 });
   const [dragXY, setDragXY] = useState({ x: 0, y: 0 });
 
