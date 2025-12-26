@@ -6,6 +6,18 @@ import AppHeader from "@/components/AppHeader";
 import { requireSession } from "@/lib/session";
 import { uidFromToken, getMatchesFor, loadUserProfileSnapshot } from "@/lib/socialStore";
 
+type MatchLike = string | { id?: string } | any;
+
+function toMatchId(m: MatchLike): string {
+  if (typeof m === "string") return m;
+  if (m && typeof m.id === "string") return m.id;
+  try {
+    return String(m);
+  } catch {
+    return "";
+  }
+}
+
 export default function MatchesPage() {
   const token = useMemo(() => {
     try { return requireSession(); } catch { return null as any; }
@@ -13,7 +25,7 @@ export default function MatchesPage() {
   const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
 
   const matches = useMemo(() => {
-    try { return getMatchesFor(uid); } catch { return [] as string[]; }
+    try { return getMatchesFor(uid) as MatchLike[]; } catch { return [] as MatchLike[]; }
   }, [uid]);
 
   return (
@@ -29,7 +41,8 @@ export default function MatchesPage() {
           </div>
         ) : (
           <div className="ff-list">
-            {matches.map((matchId) => {
+            {matches.map((m, idx) => {
+              const matchId = toMatchId(m) || `m:${idx}`;
               const parts = String(matchId).split("__");
               const otherUid =
                 parts.length === 2 ? (parts[0] === uid ? parts[1] : parts[0]) : "";
