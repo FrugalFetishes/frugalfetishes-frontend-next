@@ -80,6 +80,7 @@ function load(): SeenState {
     unreadByUser: {},
     newMatchesByUser: {},
     profileExtrasByUser: {},
+    profileSnapshotsByUser: {},
   };
   if (!isBrowser()) return empty;
   try {
@@ -282,7 +283,7 @@ export function addChatMessage(matchId: string, a: any, b?: any, c?: any): Messa
 }
 
 
-export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
+export export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
   const s = load();
   if (!s.unreadByUser[uid]) s.unreadByUser[uid] = {};
   s.unreadByUser[uid][matchId] = (s.unreadByUser[uid][matchId] || 0) + amount;
@@ -301,13 +302,37 @@ export function clearUnreadForChat(uid: string, matchId: string) {
 
 // Extra compat: placeholder snapshot loader (wired later to real profiles)
 export function loadUserProfileSnapshot(uid: string): UserProfileSnapshot | null {
-  // Local-first: we don't have a full remote profile DB yet.
-  // Return a minimal snapshot based on locally-edited extras when available.
+  // Local-first profile store.
   if (!uid) return null;
-  const snap: UserProfileSnapshot = { uid };
-  // extras are stored separately; UI reads them via getProfileExtras already.
-  // Keeping this function typed prevents Next build from inferring `never`.
+  const s = load();
+  const stored = (s.profileSnapshotsByUser && (s.profileSnapshotsByUser as any)[uid]) || null;
+  const extras = (s.profileExtrasByUser && (s.profileExtrasByUser as any)[uid]) || null;
+
+  const snap: UserProfileSnapshot = {
+    uid,
+    ...(stored || {}),
+  };
+
+  // Fill gaps from extras if present.
+  if (extras) {
+    if (!snap.displayName && typeof extras.displayName === 'string') snap.displayName = extras.displayName;
+    if (!snap.name && typeof extras.name === 'string') snap.name = extras.name;
+    if (!snap.username && typeof extras.username === 'string') snap.username = extras.username;
+    if (!snap.email && typeof extras.email === 'string') snap.email = extras.email;
+    if (!snap.photoUrl && typeof extras.photoUrl === 'string') snap.photoUrl = extras.photoUrl;
+  }
+
   return snap;
+}
+
+export function upsertUserProfileSnapshot(uid: string, patch: Partial<UserProfileSnapshot>): UserProfileSnapshot | null {
+  if (!uid) return null;
+  const s = load();
+  const prev = (s.profileSnapshotsByUser && (s.profileSnapshotsByUser as any)[uid]) || { uid };
+  const next = { ...prev, ...patch, uid };
+  (s.profileSnapshotsByUser as any)[uid] = next;
+  save(s);
+  return next;
 }
 
 // ---- Compatibility re-exports (for older imports) ----
