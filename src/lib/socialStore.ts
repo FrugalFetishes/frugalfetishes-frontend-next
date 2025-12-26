@@ -106,19 +106,32 @@ function uniqPush(arr: string[], v: string) {
 export function uidFromSessionToken(token: string | null): string | null {
   if (!token) return null;
 
-  // Prefer a stable subject/uid from a JWT-style token when available.
+  // Stable UID: keep a persisted uid across token refreshes so local matches stick.
+  // If token decodes to a stable subject/uid, we refresh the stored uid to support account switching.
+  const stored = getStoredUid();
+
+  // Attempt to decode a JWT-style token to a stable subject.
+  let decodedUid: string | null = null;
   try {
     const parts = token.split(".");
     if (parts.length >= 2) {
       const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      const decodedUid = payload.sub || payload.uid || payload.userId || payload.user_id || null;
-      if (decodedUid) return String(decodedUid);
+      decodedUid = payload.sub || payload.uid || payload.userId || payload.user_id || null;
     }
   } catch {}
 
-  // Non-JWT token: derive uid directly from the token so different logins get different uids.
-  // This remains stable across refresh because the session token itself is persisted by session.ts.
-  return "tok_" + token.slice(0, 24);
+  if (decodedUid) {
+    if (!stored || stored !== decodedUid) setStoredUid(decodedUid);
+    return decodedUid;
+  }
+
+  // Non-JWT token: fallback to token-derived uid, but persist it so it remains stable.
+  const fallback = "tok_" + token.slice(0, 12);
+  if (!stored) {
+    setStoredUid(fallback);
+    return fallback;
+  }
+  return stored;
 }
 
 export function getBadges(uid: string) {
@@ -181,12 +194,23 @@ export function sendMessage(matchId: string, fromUid: string, toUid: string, tex
   return msg;
 }
 
-export function getProfileExtras(uid: string) {
+export type ProfileExtras = {
+  headline?: string;
+  about?: string;
+  zip?: string;
+  // account / subscription
+  fullName?: string;
+  displayName?: string;
+  subscriptionTier?: "free" | "verified" | "gold" | "platinum";
+  subscriptionUpdatedAt?: number;
+};
+
+export function getProfileExtras(uid: string): ProfileExtras {
   const s = load();
   return s.profileExtrasByUser[uid] || {};
 }
 
-export function setProfileExtras(uid: string, extras: { headline?: string; about?: string; zip?: string }) {
+export function setProfileExtras(uid: string, extras: ProfileExtras) {
   const s = load();
   s.profileExtrasByUser[uid] = { ...(s.profileExtrasByUser[uid] || {}), ...extras };
   save(s);
