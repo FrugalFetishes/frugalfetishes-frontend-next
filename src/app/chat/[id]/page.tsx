@@ -91,7 +91,7 @@ export default function ChatPage() {
 
     addChatMessage(matchId, { fromUserId: uid, text: t });
     // mark unread for the other user (local)
-    if (otherUid) incrementUnread(otherUid, matchId, 1);
+    if (otherUid) incrementUnread(otherUid, matchId);
     setText("");
   }
 
