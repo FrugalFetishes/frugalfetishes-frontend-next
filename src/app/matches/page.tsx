@@ -11,11 +11,13 @@ type MatchLike = string | { id?: string } | any;
 function toMatchId(m: MatchLike): string {
   if (typeof m === "string") return m;
   if (m && typeof m.id === "string") return m.id;
-  try {
-    return String(m);
-  } catch {
-    return "";
-  }
+  try { return String(m); } catch { return ""; }
+}
+
+function fallbackNameFromUid(u: string): string {
+  if (!u) return "New match";
+  if (u.includes("@")) return u.split("@")[0] || u;
+  return u.slice(0, 8);
 }
 
 export default function MatchesPage() {
@@ -28,6 +30,20 @@ export default function MatchesPage() {
     try { return getMatchesFor(uid) as MatchLike[]; } catch { return [] as MatchLike[]; }
   }, [uid]);
 
+  // de-dupe
+  const matchIds = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const m of matches) {
+      const id = toMatchId(m);
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  }, [matches]);
+
   return (
     <div className="ff-page">
       <AppHeader active="matches" />
@@ -35,14 +51,13 @@ export default function MatchesPage() {
       <main className="ff-shell">
         <h1 className="ff-h1">Matches</h1>
 
-        {matches.length === 0 ? (
+        {matchIds.length === 0 ? (
           <div className="ff-muted">
             No matches yet. Swipe right on Discover and make sure the other account likes you back.
           </div>
         ) : (
           <div className="ff-list">
-            {matches.map((m, idx) => {
-              const matchId = toMatchId(m) || `m:${idx}`;
+            {matchIds.map((matchId) => {
               const parts = String(matchId).split("__");
               const otherUid =
                 parts.length === 2 ? (parts[0] === uid ? parts[1] : parts[0]) : "";
@@ -53,8 +68,8 @@ export default function MatchesPage() {
                 p?.displayName ||
                 p?.username ||
                 p?.email ||
-                otherUid ||
-                "New match";
+                fallbackNameFromUid(otherUid);
+
               const photo =
                 p?.photoUrl ||
                 p?.profilePhotoUrl ||
@@ -72,9 +87,7 @@ export default function MatchesPage() {
                     </div>
                   </div>
 
-                  <Link className="ff-pill" href={`/matches/${matchId}`}>
-                    Open
-                  </Link>
+                  <Link className="ff-pill" href={`/matches/${matchId}`}>Open</Link>
                 </div>
               );
             })}
