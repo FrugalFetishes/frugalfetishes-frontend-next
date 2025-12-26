@@ -115,7 +115,7 @@ export function setUserId(uid: string) {
   localStorage.setItem(USER_ID_KEY, uid);
 }
 
-export function uidFromToken(token: string): string {
+export function uidFromToken(token: string | null): string {
   // tokens in this project are typically:
   // - "uid:<uid>"
   // - "<uid>"
