@@ -406,7 +406,7 @@ export default function DiscoverPage() {
         <div style={containerStyle}>
           {/* Card stack */}
           <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <div style={cardWrapStyle}>
+            <div style={cardWrap}>
               {loading ? (
                 <div style={{ opacity: 0.9, padding: 18 }}>Loading…</div>
               ) : current ? (
