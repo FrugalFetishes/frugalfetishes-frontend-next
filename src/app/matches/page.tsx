@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import AppHeader from "@/components/AppHeader";
 import { requireSession } from "@/lib/session";
-import { uidFromToken, getMatchesForUser, loadUserProfileSnapshot } from "@/lib/socialStore";
+import { uidFromToken, getMatchesFor, loadUserProfileSnapshot } from "@/lib/socialStore";
 
 export default function MatchesPage() {
   const token = useMemo(() => {
@@ -13,7 +13,7 @@ export default function MatchesPage() {
   const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
 
   const matches = useMemo(() => {
-    try { return getMatchesForUser(uid); } catch { return [] as string[]; }
+    try { return getMatchesFor(uid); } catch { return [] as string[]; }
   }, [uid]);
 
   return (
