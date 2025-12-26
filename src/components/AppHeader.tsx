@@ -1,15 +1,37 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { badgeCounts } from "@/lib/socialStore";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { requireSession, clearSession } from "@/lib/session";
+import { uidFromToken, badgeCounts } from "@/lib/socialStore";
 
-type MenuItem = { href: string; label: string; badge?: number };
+type ActiveTab = "discover" | "matches" | "chat" | "profile";
 
-export default function AppHeader(props: { active?: "discover" | "matches" | "chat" | "profile" }) {
+type CountsState = {
+  newMatches: number;
+  unreadMessages: number;
+};
+
+function safeNum(v: any): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export default function AppHeader(props: { active?: ActiveTab }) {
+  const pathname = usePathname();
+  const active: ActiveTab =
+    props.active ||
+    (pathname?.startsWith("/discover")
+      ? "discover"
+      : pathname?.startsWith("/matches")
+      ? "matches"
+      : pathname?.startsWith("/chat")
+      ? "chat"
+      : "profile");
+
   const [open, setOpen] = useState(false);
-  const [counts, setCounts] = useState<{ newMatches: number; unreadMessages: number }>({
+  const [counts, setCounts] = useState<CountsState>({
     newMatches: 0,
     unreadMessages: 0,
   });
@@ -22,50 +44,27 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
     }
   }, []);
 
-  // uid is derived inside badgeCounts via localStorage keys, but for safety we refresh counts by scanning
+  const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
+
   useEffect(() => {
     const tick = () => {
       try {
-        // badgeCounts uses uid keys; we store by uid in socialStore, so we need uid in localStorage to exist.
-        // In practice, token->uid is used by pages that create matches/messages. Here we just refresh.
-        // Pages will write the keys; we just compute.
-        const uid = (() => {
-          try {
-            const parts = String(token || "").split(".");
-            if (parts.length < 2) return "anon";
-            const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-            const json = decodeURIComponent(
-              atob(b64)
-                .split("")
-                .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-                .join("")
-            );
-            const payload = JSON.parse(json) as any;
-            return payload?.uid || payload?.user_id || payload?.sub || "anon";
-          } catch {
-            return "anon";
-          }
-        })();
         const raw: any = badgeCounts(uid);
         setCounts({
-          newMatches: Number(raw?.matches ?? 0),
-          unreadMessages: Number(raw?.messages ?? 0),
+          newMatches: safeNum(raw?.matches),
+          unreadMessages: safeNum(raw?.messages),
         });
-      } catch {}
+      } catch {
+        setCounts({ newMatches: 0, unreadMessages: 0 });
+      }
     };
+
     tick();
     const id = window.setInterval(tick, 800);
     return () => window.clearInterval(id);
-  }, [token]);
+  }, [uid]);
 
-  const totalBadge = counts.newMatches + counts.unreadMessages;
-
-  const items: MenuItem[] = [
-    { href: "/discover", label: "Discover" },
-    { href: "/matches", label: "Matches", badge: counts.newMatches || undefined },
-    { href: "/chat/inbox", label: "Messages", badge: counts.unreadMessages || undefined },
-    { href: "/search", label: "Advanced Search", badge: undefined },
-  ];
+  const anyBadge = (counts.newMatches + counts.unreadMessages) > 0;
 
   function onLogout() {
     try {
@@ -76,19 +75,16 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
 
   return (
     <header className="ff-header">
-      <button
-        className="ff-hamburger"
-        aria-label="Menu"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="ff-ham-line" />
-        <span className="ff-ham-line" />
-        <span className="ff-ham-line" />
-        {totalBadge > 0 ? <span className="ff-badge">{totalBadge}</span> : null}
-      </button>
-
-      <div className="ff-brand">
-        <img className="ff-brand-img" src="/FFmenuheaderlogo.png" alt="FrugalFetishes" />
+      <div className="ff-header-left">
+        <button
+          className="ff-hamburger"
+          aria-label="Menu"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="ff-hamburger-icon">☰</span>
+          {anyBadge ? <span className="ff-badge-dot" aria-label="Notifications" /> : null}
+        </button>
+        <div className="ff-brand">FrugalFetishes</div>
       </div>
 
       <div className="ff-header-right">
@@ -98,23 +94,49 @@ export default function AppHeader(props: { active?: "discover" | "matches" | "ch
       </div>
 
       {open ? (
-        <div className="ff-menu" role="menu" aria-label="Main menu">
-          {items.map((it) => (
-            <Link
-              key={it.href}
-              className="ff-menu-item"
-              href={it.href}
-              onClick={() => setOpen(false)}
-            >
-              <span>{it.label}</span>
-              {it.badge ? <span className="ff-badge ff-badge-sm">{it.badge}</span> : null}
-            </Link>
-          ))}
-          <div className="ff-menu-divider" />
-          <button className="ff-menu-item" onClick={onLogout}>
-            <span>Logout</span>
-          </button>
-        </div>
+        <nav className="ff-menu" role="navigation" aria-label="Main menu">
+          <Link
+            className={active === "discover" ? "ff-menu-item ff-menu-active" : "ff-menu-item"}
+            href="/discover"
+            onClick={() => setOpen(false)}
+          >
+            Discover
+          </Link>
+
+          <Link
+            className={active === "matches" ? "ff-menu-item ff-menu-active" : "ff-menu-item"}
+            href="/matches"
+            onClick={() => setOpen(false)}
+          >
+            <span>Matches</span>
+            {counts.newMatches > 0 ? (
+              <span className="ff-menu-badge" aria-label={`${counts.newMatches} new matches`}>
+                {counts.newMatches}
+              </span>
+            ) : null}
+          </Link>
+
+          <Link
+            className={active === "chat" ? "ff-menu-item ff-menu-active" : "ff-menu-item"}
+            href="/chat"
+            onClick={() => setOpen(false)}
+          >
+            <span>Messages</span>
+            {counts.unreadMessages > 0 ? (
+              <span className="ff-menu-badge" aria-label={`${counts.unreadMessages} unread messages`}>
+                {counts.unreadMessages}
+              </span>
+            ) : null}
+          </Link>
+
+          <Link
+            className={active === "profile" ? "ff-menu-item ff-menu-active" : "ff-menu-item"}
+            href="/profile"
+            onClick={() => setOpen(false)}
+          >
+            Profile
+          </Link>
+        </nav>
       ) : null}
     </header>
   );
