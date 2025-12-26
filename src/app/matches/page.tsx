@@ -1,106 +1,67 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import AppHeader from "@/components/AppHeader";
-import { requireSession } from "@/lib/session";
-import { uidFromToken, getMatchesFor, type Match } from "@/lib/socialStore";
-import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 
-type ProfileLite = {
-  displayName?: string;
-  name?: string;
-  username?: string;
-  photoUrl?: string;
-  photoURL?: string;
-  avatarUrl?: string;
-};
+import AppHeader from '@/components/AppHeader';
+import { requireSession } from '@/lib/session';
+import {
+  uidFromToken,
+  getMatchesFor,
+  loadUserProfileSnapshot,
+  type Match,
+} from '@/lib/socialStore';
 
-type MatchRow = {
+type Row = {
   matchId: string;
   otherUid: string;
-  matchedAt?: number;
   name: string;
   photo: string;
+  matchedAt?: number;
 };
 
-function fallbackNameFromUid(uid: string): string {
-  if (!uid) return "Match";
-  if (uid.includes("@")) return uid.split("@")[0] || uid;
-  return uid.slice(0, 8);
+function shortUid(uid: string) {
+  if (!uid) return 'User';
+  const s = String(uid);
+  return s.includes('@') ? s.split('@')[0] : s.slice(0, 8);
 }
 
 function toMillis(v: any): number | undefined {
-  if (!v) return undefined;
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
+  if (v == null) return undefined;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
     const n = Number(v);
     if (Number.isFinite(n)) return n;
     const d = Date.parse(v);
-    if (!Number.isNaN(d)) return d;
+    if (Number.isFinite(d)) return d;
     return undefined;
   }
-  // Firestore Timestamp-like
-  if (typeof v === "object") {
-    if (typeof v.toMillis === "function") {
-      try {
-        return v.toMillis();
-      } catch {}
-    }
-    if (typeof v.seconds === "number") return v.seconds * 1000;
-  }
+  // Firestore Timestamp shape { seconds, nanoseconds }
+  if (typeof v === 'object' && typeof v.seconds === 'number') return v.seconds * 1000;
   return undefined;
 }
 
-function getOtherUid(uid: string, match: any): string | null {
-  // tolerate legacy shapes without failing typecheck
-  const a: string | undefined = match?.a ?? match?.userA ?? match?.uidA ?? match?.users?.[0];
-  const b: string | undefined = match?.b ?? match?.userB ?? match?.uidB ?? match?.users?.[1];
-  if (a && b) return a === uid ? b : a;
-  // fallback: if matchId encodes two uids "a__b"
-  const id: string | undefined = match?.id ?? match?.matchId;
-  if (id && id.includes("__")) {
-    const [x, y] = id.split("__");
-    if (x && y) return x === uid ? y : x;
-  }
-  return null;
+function matchIdFrom(m: string | Match): string {
+  if (typeof m === 'string') return m;
+  const anyM: any = m as any;
+  return String(anyM.id ?? anyM.matchId ?? anyM.key ?? '');
 }
 
-function getMatchedAt(match: any): number | undefined {
-  return (
-    toMillis(match?.createdAt) ??
-    toMillis(match?.matchedAt) ??
-    toMillis(match?.created) ??
-    toMillis(match?.ts) ??
-    undefined
-  );
-}
-
-function formatDateTime(ms?: number): string {
-  if (!ms) return "";
-  try {
-    return new Date(ms).toLocaleString(undefined, {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
+function otherUidFrom(m: string | Match, selfUid: string): string {
+  if (typeof m === 'string') {
+    // If matchId encodes both uids like "uidA__uidB" or "uidA:uidB" try to extract.
+    const s = m;
+    const parts = s.includes('__') ? s.split('__') : s.includes(':') ? s.split(':') : s.split('|');
+    if (parts.length === 2) return parts[0] === selfUid ? parts[1] : parts[0];
+    return '';
   }
-}
-
-async function loadProfileLite(uid: string): Promise<ProfileLite | null> {
-  try {
-    const ref = doc(db, "profiles", uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) return null;
-    return (snap.data() as any) ?? null;
-  } catch {
-    return null;
-  }
+  const anyM: any = m as any;
+  const a: string | undefined = anyM.a ?? anyM.userA ?? anyM.uidA;
+  const b: string | undefined = anyM.b ?? anyM.userB ?? anyM.uidB;
+  if (a && b) return a === selfUid ? b : a;
+  // last resort: try parsing from id
+  const mid = matchIdFrom(m);
+  return otherUidFrom(mid, selfUid);
 }
 
 export default function MatchesPage() {
@@ -113,61 +74,75 @@ export default function MatchesPage() {
   }, []);
 
   const uid = useMemo(() => {
-    if (!token) return "anon";
-    return uidFromToken(token) ?? "anon";
+    try {
+      return uidFromToken(token);
+    } catch {
+      return '';
+    }
   }, [token]);
 
-  const [rows, setRows] = useState<MatchRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [err, setErr] = useState<string>('');
 
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
 
     const run = async () => {
-      setLoading(true);
-
-      let matches: Match[] = [];
       try {
-        matches = getMatchesFor(uid) as any;
-      } catch {
-        matches = [];
-      }
+        setErr('');
+        if (!uid) {
+          if (alive) setRows([]);
+          return;
+        }
 
-      const built: MatchRow[] = [];
+        const raw = getMatchesFor(uid) as unknown as Array<string | Match>;
+        const list = Array.isArray(raw) ? raw : [];
 
-      for (const m of matches as any[]) {
-        const matchId: string = String(m?.id ?? m?.matchId ?? "");
-        const otherUid = getOtherUid(uid, m);
-        if (!matchId || !otherUid) continue;
+        const built: Row[] = [];
+        for (const m of list) {
+          const matchId = matchIdFrom(m);
+          if (!matchId) continue;
 
-        const matchedAt = getMatchedAt(m);
+          const otherUid = otherUidFrom(m, uid);
+          const snap: any = otherUid ? await loadUserProfileSnapshot(otherUid) : null;
 
-        const prof = await loadProfileLite(otherUid);
+          const name =
+            (snap?.displayName as string) ||
+            (snap?.name as string) ||
+            (snap?.username as string) ||
+            shortUid(otherUid);
 
-        const name =
-          (prof?.displayName || prof?.name || prof?.username || "").trim() ||
-          fallbackNameFromUid(otherUid);
+          const photo =
+            (snap?.photoUrl as string) ||
+            (snap?.photoURL as string) ||
+            (snap?.avatarUrl as string) ||
+            (snap?.avatar as string) ||
+            '/icon.png';
 
-        const photo =
-          (prof?.photoUrl || prof?.photoURL || prof?.avatarUrl || "").trim() ||
-          "/avatar.png";
+          const anyM: any = typeof m === 'string' ? {} : (m as any);
+          const matchedAt =
+            toMillis(anyM.createdAt) ??
+            toMillis(anyM.matchedAt) ??
+            toMillis(anyM.ts) ??
+            toMillis(anyM.updatedAt);
 
-        built.push({ matchId, otherUid, matchedAt, name, photo });
-      }
+          built.push({ matchId, otherUid, name, photo, matchedAt });
+        }
 
-      // newest first
-      built.sort((a, b) => (b.matchedAt ?? 0) - (a.matchedAt ?? 0));
+        // newest first when we have timestamps
+        built.sort((x, y) => (y.matchedAt ?? 0) - (x.matchedAt ?? 0));
 
-      if (!cancelled) {
-        setRows(built);
-        setLoading(false);
+        if (alive) setRows(built);
+      } catch (e: any) {
+        if (!alive) return;
+        setRows([]);
+        setErr(e?.message ? String(e.message) : 'Failed to load matches');
       }
     };
 
     run();
-
     return () => {
-      cancelled = true;
+      alive = false;
     };
   }, [uid]);
 
@@ -178,31 +153,46 @@ export default function MatchesPage() {
       <main className="ff-main">
         <h1 className="ff-h1">Matches</h1>
 
-        {loading ? (
-          <div className="ff-muted">Loading…</div>
-        ) : rows.length === 0 ? (
+        {err ? (
+          <div className="ff-muted" style={{ maxWidth: 720 }}>
+            {err}
+          </div>
+        ) : null}
+
+        {rows.length === 0 ? (
           <div className="ff-muted">
             No matches yet. Swipe right on Discover and make sure the other account likes you back.
           </div>
         ) : (
           <div className="ff-list">
-            {rows.map((r) => (
-              <div key={r.matchId} className="ff-row">
-                <div className="ff-row-left">
-                  <img className="ff-avatar" src={r.photo} alt={r.name} />
-                  <div className="ff-row-text">
-                    <div className="ff-row-title">{r.name}</div>
-                    <div className="ff-row-sub">
-                      {r.matchedAt ? `Matched ${formatDateTime(r.matchedAt)}` : "New match"}
+            {rows.map((r) => {
+              const when =
+                r.matchedAt != null
+                  ? new Date(r.matchedAt).toLocaleString(undefined, {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })
+                  : 'New match';
+
+              return (
+                <div key={r.matchId} className="ff-row">
+                  <div className="ff-row-left">
+                    <img className="ff-avatar" src={r.photo} alt={r.name} />
+                    <div className="ff-row-text">
+                      <div className="ff-row-title">{r.name}</div>
+                      <div className="ff-row-sub">{when}</div>
                     </div>
                   </div>
-                </div>
 
-                <Link className="ff-pill" href={`/matches/${encodeURIComponent(r.matchId)}`}>
-                  Open
-                </Link>
-              </div>
-            ))}
+                  <Link className="ff-btn" href={`/matches/${encodeURIComponent(r.matchId)}`}>
+                    Open
+                  </Link>
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
