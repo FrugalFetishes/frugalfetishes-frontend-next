@@ -33,6 +33,38 @@ type SeenState = {
 
 const KEY = "ff_social_v1";
 
+const UID_KEY = "ff_user_id_v1";
+const TOKEN_FP_KEY = "ff_user_token_fp_v1";
+
+function getStoredUid(): string | null {
+  if (!isBrowser()) return null;
+  try {
+    return localStorage.getItem(UID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredUid(uid: string, token: string) {
+  if (!isBrowser()) return;
+  try {
+    localStorage.setItem(UID_KEY, uid);
+    localStorage.setItem(TOKEN_FP_KEY, token.slice(0, 16));
+  } catch {}
+}
+
+function shouldReplaceStoredUid(token: string): boolean {
+  if (!isBrowser()) return false;
+  try {
+    const fp = localStorage.getItem(TOKEN_FP_KEY) || "";
+    const next = token.slice(0, 16);
+    return fp !== "" && fp !== next;
+  } catch {
+    return false;
+  }
+}
+
+
 function isBrowser() {
   return typeof window !== "undefined" && typeof localStorage !== "undefined";
 }
@@ -71,15 +103,40 @@ function uniqPush(arr: string[], v: string) {
 
 export function uidFromSessionToken(token: string | null): string | null {
   if (!token) return null;
+
+  // Stable UID: keep a persisted uid across token refreshes so local matches stick.
+  // If token decodes to a stable subject/uid, we refresh the stored uid to support account switching.
+  const stored = getStoredUid();
+
+  // Attempt to decode a JWT-style token to a stable subject.
+  let decodedUid: string | null = null;
   try {
     const parts = token.split(".");
     if (parts.length >= 2) {
-      const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      const json = JSON.parse(atob(payload));
-      return (json.user_id || json.uid || json.sub || null) as string | null;
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      decodedUid = payload.sub || payload.uid || payload.userId || payload.user_id || null;
     }
   } catch {}
-  return "tok_" + token.slice(0, 12);
+
+  if (decodedUid) {
+    if (!stored || stored !== decodedUid) setStoredUid(decodedUid, token);
+    return decodedUid;
+  }
+
+  // Non-JWT token: fallback to token-derived uid, but persist it so it remains stable.
+  const fallback = "tok_" + token.slice(0, 12);
+  if (!stored) {
+    setStoredUid(fallback, token);
+    return fallback;
+  }
+
+  // If token fingerprint changes, assume session switched; update stored uid to the new fallback.
+  if (shouldReplaceStoredUid(token)) {
+    setStoredUid(fallback, token);
+    return fallback;
+  }
+
+  return stored;
 }
 
 export function getBadges(uid: string) {
