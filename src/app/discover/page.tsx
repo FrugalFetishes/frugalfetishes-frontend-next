@@ -387,6 +387,14 @@ export default function DiscoverPage() {
     touchAction: 'none',
   };
 
+  const cardBottomStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 12,
+  };
+
   const photoStyle: React.CSSProperties = {
     position: 'absolute',
     inset: 0,
