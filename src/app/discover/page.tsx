@@ -245,15 +245,19 @@ export default function DiscoverPage() {
       // Some apiPost implementations return a Response; handle that too.
       const status = typeof res?.status === 'number' ? res.status : null;
       if (status === 404) {
+        // Backend endpoint not deployed yet; fall back to local-only decisions.
         setDecisionApiEnabled(false);
-        setStatus('Decision API not available (404). Using local-only matches for now.');
+        // Keep UI quiet; this is expected in dev.
+        console.info('Decision API not available (404). Falling back to local-only decisions.');
       }
     } catch (e: any) {
       const msg = String(e?.message || e || '');
       // If we can detect a 404 from the thrown error, disable future calls.
       if (msg.includes('404')) {
+        // Backend endpoint not deployed yet; fall back to local-only decisions.
         setDecisionApiEnabled(false);
-        setStatus('Decision API not available (404). Using local-only matches for now.');
+        // Keep UI quiet; this is expected in dev.
+        console.info('Decision API not available (404). Falling back to local-only decisions.');
       }
       // Otherwise ignore so UI still works.
     }
