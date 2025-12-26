@@ -315,6 +315,8 @@ export default function DiscoverPage() {
     drag.current.active = true;
     drag.current.x0 = e.clientX;
     drag.current.y0 = e.clientY;
+    try { e.currentTarget?.setPointerCapture?.(e.pointerId); } catch {}
+
     drag.current.dx = 0;
     drag.current.dy = 0;
     setSwipeLabel(null);
@@ -333,6 +335,8 @@ export default function DiscoverPage() {
       if (dy > THRESH_DOWN) {
         setExpanded(false);
         drag.current.active = false;
+    try { e.currentTarget?.releasePointerCapture?.(e.pointerId); } catch {}
+
         setDragXY({ x: 0, y: 0 });
       }
       return;
