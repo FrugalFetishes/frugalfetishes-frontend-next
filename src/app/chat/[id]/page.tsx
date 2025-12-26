@@ -14,6 +14,9 @@ import {
   loadUserProfileSnapshot,
 } from "@/lib/socialStore";
 
+// Type helper: socialStore snapshot is optional and may be null (local placeholder).
+type ProfileSnapshot = { name?: string; photoUrl?: string; headline?: string; age?: number; city?: string } | null;
+
 type Row =
   | { kind: "date"; id: string; label: string }
   | { kind: "msg"; id: string; from: string; text: string; ts: number };
@@ -50,7 +53,7 @@ export default function ChatPage() {
     return parts[0] === uid ? parts[1] : parts[0];
   }, [matchId, uid]);
 
-  const other = useMemo(() => loadUserProfileSnapshot(otherUid), [otherUid]);
+  const other = useMemo<ProfileSnapshot>(() => (loadUserProfileSnapshot(otherUid) as any) as ProfileSnapshot, [otherUid]);
   const otherName = other?.name || otherUid || "Chat";
 
   const [text, setText] = useState("");
