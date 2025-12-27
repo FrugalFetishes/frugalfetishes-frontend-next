@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import AppHeader from "@/components/AppHeader";
 import { requireSession } from "@/lib/session";
-import { uidFromToken, getMatchesFor, loadUserProfileSnapshot, type Match } from "@/lib/socialStore";
+import {
+  uidFromToken,
+  getMatchesFor,
+  loadUserProfileSnapshot,
+  unreadCountForMatch,
+  clearUnreadForChat,
+  type Match,
+} from "@/lib/socialStore";
 
 type Row = {
   matchId: string;
@@ -20,7 +27,14 @@ function safeNum(v: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function displayNameFromProfile(p: any, fallbackUid: string) {
+function displayNameFromProfile(p: any, fallbackUid: string, match?: any) {
+  const fromMatch =
+    match?.otherDisplayName ||
+    match?.otherName ||
+    match?.displayName ||
+    match?.fullName ||
+    match?.name;
+  if (typeof fromMatch === 'string' && fromMatch.trim()) return fromMatch.trim();
   const name =
     p?.displayName ||
     p?.name ||
@@ -34,7 +48,15 @@ function displayNameFromProfile(p: any, fallbackUid: string) {
   return (fallbackUid || "User").slice(0, 8);
 }
 
-function photoFromProfile(p: any) {
+function photoFromProfile(p: any, match?: any) {
+  const fromMatch =
+    match?.otherPhotoUrl ||
+    match?.otherPhotoURL ||
+    match?.photoUrl ||
+    match?.photoURL ||
+    match?.avatarUrl ||
+    match?.primaryPhotoUrl;
+  if (typeof fromMatch === 'string' && fromMatch.trim()) return fromMatch.trim();
   return (
     p?.photoUrl ||
     p?.avatarUrl ||
@@ -115,16 +137,21 @@ export default function MessagesPage() {
         safeNum((m as any).createdAt) ||
         Date.now();
 
-      const unread =
-        safeNum((m as any).unread?.[uid]) ||
-        safeNum((m as any).unreadCount?.[uid]) ||
-        safeNum((m as any).unreadCount) ||
-        0;
+      let unread = 0;
+      try {
+        unread = unreadCountForMatch(uid, matchId);
+      } catch {
+        unread =
+          safeNum((m as any).unread?.[uid]) ||
+          safeNum((m as any).unreadCount?.[uid]) ||
+          safeNum((m as any).unreadCount) ||
+          0;
+      }
 
       out.push({
         matchId,
         otherUid,
-        name: displayNameFromProfile(p, otherUid),
+        name: displayNameFromProfile(p, otherUid, m),
         photo: photoFromProfile(p),
         lastTs,
         unread,
@@ -170,7 +197,15 @@ export default function MessagesPage() {
                   </div>
                 </div>
 
-                <Link className="ff-btn" href={`/chat/${encodeURIComponent(r.matchId)}`}>
+                <Link
+                  className="ff-btn"
+                  href={`/chat/${encodeURIComponent(r.matchId)}`}
+                  onClick={() => {
+                    try {
+                      clearUnreadForChat(uid, r.matchId);
+                    } catch {}
+                  }}
+                >
                   Open
                 </Link>
               </div>
