@@ -13,7 +13,7 @@ export default function MatchesPage() {
   return (
     <div className="ff-page">
       <AppHeader active="matches" />
-      <main className="ff-shell" style={{ maxWidth: 920 }}>
+      <main className="ff-shell" style={{ maxWidth: 920, display: 'block', width: '100%', paddingTop: 8, paddingBottom: 24 }}>
         <SocialMatchesLayout myUid={myUid} />
       </main>
     </div>
