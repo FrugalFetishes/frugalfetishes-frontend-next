@@ -182,8 +182,8 @@ export function likeUser(fromUid: string, toUid: string): string | null {
   const mid = matchIdFor(from, to);
   const match: Match = { id: mid, a: from < to ? from : to, b: from < to ? to : from, createdAt: now() };
 
-  const mFrom = ensureMap(s.matchesByUser, from, () => ({}));
-  const mTo = ensureMap(s.matchesByUser, to, () => ({}));
+  const mFrom = ensureMap(s.matchesByUser, from, () => ({} as Record<string, Match>));
+  const mTo = ensureMap(s.matchesByUser, to, () => ({} as Record<string, Match>));
 
   // Only create once
   if (!mFrom[mid] && !mTo[mid]) {
