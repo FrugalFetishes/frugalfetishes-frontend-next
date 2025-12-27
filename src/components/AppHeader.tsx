@@ -141,6 +141,22 @@ export default function AppHeader(props: {
     background: 'rgba(255,255,255,0.10)',
   };
 
+  const badgeStyle: React.CSSProperties = {
+    marginLeft: 8,
+    minWidth: 18,
+    height: 18,
+    padding: '0 6px',
+    borderRadius: 999,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 11,
+    fontWeight: 800,
+    background: 'rgba(255, 80, 120, 0.95)',
+    color: 'white',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
+  };
+
   function go(path: string) {
     setOpen(false);
     router.push(path);
@@ -262,7 +278,7 @@ export default function AppHeader(props: {
             onClick={() => go('/matches')}
           >
             <span>Inbox</span>
-            {inboxBadge > 0 ? <span style={badge}>{inboxBadge}</span> : null}
+            {inboxBadge > 0 ? <span style={badgeStyle}>{inboxBadge}</span> : null}
           </div>
 
           <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7, marginTop: 4 }}>Search</div>
