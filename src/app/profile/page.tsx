@@ -107,6 +107,7 @@ export default function ProfilePage() {
   const [about, setAbout] = useState<string>(clampStr(extras?.about || ''));
   const [primaryPhotoUrl, setPrimaryPhotoUrl] = useState<string>(clampStr(initialPrimary));
   const [gallery, setGallery] = useState<string[]>(initialGallery);
+  const effectivePrimary = useMemo(() => normalizePhotoUrl(primaryPhotoUrl || ''), [primaryPhotoUrl]);
 
   const [newUrl, setNewUrl] = useState<string>('');
   const [status, setStatus] = useState<string>('');
