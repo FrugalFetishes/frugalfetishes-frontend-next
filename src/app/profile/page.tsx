@@ -3,53 +3,57 @@
 import { useMemo, useState } from 'react';
 import AppHeader from '@/components/AppHeader';
 import { requireSession } from '@/lib/session';
-import { uidFromToken, loadUserProfileSnapshot, upsertUserProfileSnapshot, getProfileExtras, setProfileExtras } from '@/lib/socialStore';
+import {
+  uidFromToken,
+  loadUserProfileSnapshot,
+  upsertUserProfileSnapshot,
+  getProfileExtras,
+  setProfileExtras,
+} from '@/lib/socialStore';
 
 export default function ProfilePage() {
   const token = useMemo(() => requireSession(), []);
-  const uid = useMemo(() => uidFromToken(token) || 'anon', [token]);
+  const uid = useMemo(() => uidFromToken(token), [token]);
 
   const snap = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
   const extras = useMemo(() => getProfileExtras(uid), [uid]);
 
-  const [displayName, setDisplayName] = useState<string>((snap?.displayName || snap?.name || extras?.displayName || '').toString());
-  const [fullName, setFullName] = useState<string>((extras?.fullName || snap?.name || '').toString());
-  const [photoUrl, setPhotoUrl] = useState<string>((snap?.photoUrl || snap?.photoURL || snap?.avatarUrl || snap?.primaryPhotoUrl || '').toString());
-  const [headline, setHeadline] = useState<string>((extras?.headline || '').toString());
-  const [about, setAbout] = useState<string>((extras?.about || snap?.about || '').toString());
-  const [zip, setZip] = useState<string>((extras?.zip || '').toString());
-  const [status, setStatus] = useState<string>('');
+  const [displayName, setDisplayName] = useState<string>(
+    String((snap?.displayName || extras?.displayName || '').toString())
+  );
+  const [fullName, setFullName] = useState<string>(String((snap?.fullName || extras?.fullName || '').toString()));
+  const [photoUrl, setPhotoUrl] = useState<string>(String((snap?.photoUrl || '').toString()));
+  const [headline, setHeadline] = useState<string>(String((extras?.headline || '').toString()));
+  const [about, setAbout] = useState<string>(String((extras?.about || '').toString()));
 
-  function saveAll() {
-    try {
-      upsertUserProfileSnapshot(uid, {
-        id: uid,
-        displayName: displayName.trim() || undefined,
-        name: fullName.trim() || undefined,
-        photoUrl: photoUrl.trim() || undefined,
-      });
-      setProfileExtras(uid, {
-        displayName: displayName.trim() || undefined,
-        fullName: fullName.trim() || undefined,
-        headline: headline.trim() || undefined,
-        about: about.trim() || undefined,
-        zip: zip.trim() || undefined,
-      });
-      setStatus('Saved.');
-      window.setTimeout(() => setStatus(''), 1200);
-    } catch {
-      setStatus('Save failed.');
-      window.setTimeout(() => setStatus(''), 1600);
-    }
+  function onSave() {
+    // Save snapshot (used by Matches/Messages display)
+    upsertUserProfileSnapshot(uid, {
+      id: uid,
+      displayName: displayName.trim(),
+      fullName: fullName.trim(),
+      photoUrl: photoUrl.trim(),
+      email: extras?.email,
+    });
+
+    // Save extras (account + subscription)
+    setProfileExtras(uid, {
+      displayName: displayName.trim(),
+      fullName: fullName.trim(),
+      headline: headline.trim(),
+      about: about.trim(),
+    });
+
+    alert('Saved');
   }
 
-  const fieldStyle: React.CSSProperties = {
+  const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '10px 12px',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,0.14)',
-    background: 'rgba(255,255,255,0.06)',
-    color: 'rgba(255,255,255,0.92)',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.16)',
+    background: 'rgba(0,0,0,0.25)',
+    color: 'white',
     outline: 'none',
   };
 
@@ -58,72 +62,61 @@ export default function ProfilePage() {
   return (
     <div className="ff-page">
       <AppHeader active="profile" />
-
-      <main className="ff-shell" style={{ maxWidth: 820 }}>
+      <main className="ff-shell" style={{ maxWidth: 920 }}>
         <h1 className="ff-h1">Profile</h1>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12, maxWidth: 640 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div>
-            <div style={labelStyle}>Display name</div>
-            <input style={fieldStyle} value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Public name (shown on matches/messages)" />
+            <div style={labelStyle}>Display Name</div>
+            <input style={inputStyle} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </div>
 
           <div>
-            <div style={labelStyle}>Full name</div>
-            <input style={fieldStyle} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your full name" />
+            <div style={labelStyle}>Full Name</div>
+            <input style={inputStyle} value={fullName} onChange={(e) => setFullName(e.target.value)} />
           </div>
 
-          <div>
-            <div style={labelStyle}>Profile photo URL</div>
-            <input style={fieldStyle} value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="https://…" />
-            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
-              (Optional) If blank, the app will show a placeholder avatar.
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={labelStyle}>Photo URL</div>
+            <input style={inputStyle} value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} />
+            <div style={{ marginTop: 10, display: 'flex', gap: 12, alignItems: 'center' }}>
+              {photoUrl ? (
+                <img
+                  src={photoUrl}
+                  alt="Profile"
+                  style={{ width: 72, height: 72, borderRadius: 16, objectFit: 'cover' }}
+                />
+              ) : (
+                <div style={{ width: 72, height: 72, borderRadius: 16, background: 'rgba(255,255,255,0.08)' }} />
+              )}
+              <div style={{ opacity: 0.8, fontSize: 12 }}>UID: {uid}</div>
             </div>
           </div>
 
-          <div>
+          <div style={{ gridColumn: '1 / -1' }}>
             <div style={labelStyle}>Headline</div>
-            <input style={fieldStyle} value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="Short headline shown on profile" />
+            <input style={inputStyle} value={headline} onChange={(e) => setHeadline(e.target.value)} />
           </div>
 
-          <div>
+          <div style={{ gridColumn: '1 / -1' }}>
             <div style={labelStyle}>About</div>
             <textarea
-              style={{ ...fieldStyle, minHeight: 110, resize: 'vertical' }}
+              style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }}
               value={about}
               onChange={(e) => setAbout(e.target.value)}
-              placeholder="Write something about yourself…"
             />
           </div>
+        </div>
 
-          <div>
-            <div style={labelStyle}>ZIP</div>
-            <input style={fieldStyle} value={zip} onChange={(e) => setZip(e.target.value)} placeholder="ZIP code (for distance later)" />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button
-              type="button"
-              onClick={saveAll}
-              style={{
-                borderRadius: 999,
-                padding: '10px 14px',
-                border: '1px solid rgba(255,255,255,0.14)',
-                background: 'rgba(255,255,255,0.10)',
-                color: 'rgba(255,255,255,0.92)',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: 800,
-              }}
-            >
-              Save
-            </button>
-            {status ? <div style={{ fontSize: 12, opacity: 0.8 }}>{status}</div> : null}
-          </div>
-
-          <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-            Your UID: <span style={{ fontFamily: 'monospace' }}>{uid}</span>
-          </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button
+            type="button"
+            className="ff-btn"
+            onClick={onSave}
+            style={{ padding: '10px 14px', borderRadius: 12, fontWeight: 800 }}
+          >
+            Save
+          </button>
         </div>
       </main>
     </div>
