@@ -201,7 +201,7 @@ export default function MatchesPage() {
                     href={`/matches/${encodeURIComponent(r.matchId)}`}
                     onClick={() => {
                       try {
-                        markMatchClicked(myUid, r.matchId);
+                        markMatchClicked(uid, r.matchId);
                       } catch {}
                     }}
                   >
