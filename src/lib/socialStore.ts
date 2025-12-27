@@ -85,7 +85,7 @@ function clamp(n: any): number {
   return Math.max(0, Math.floor(x));
 }
 
-function ensureMap<T>(obj: Record<string, T>, key: string, init: () => T): T {
+function ensureMap<T extends Record<string, any>>(obj: Record<string, T>, key: string, init: () => T): T {
   if (!obj[key]) obj[key] = init();
   return obj[key];
 }
