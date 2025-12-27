@@ -168,10 +168,10 @@ export function likeUser(fromUid: string, toUid: string): string | null {
   if (!from || !to || from === 'anon' || to === 'anon' || from === to) return null;
 
   const s = load();
-  const likesFrom = ensureMap(s.likesByUser, from, () => ({}));
+  const likesFrom = ensureMap(s.likesByUser, from, () => ({} as Record<string, number>));
   likesFrom[to] = now();
 
-  const likesTo = ensureMap(s.likesByUser, to, () => ({}));
+  const likesTo = ensureMap(s.likesByUser, to, () => ({} as Record<string, number>));
   const isReciprocal = Boolean(likesTo[from]);
 
   if (!isReciprocal) {
