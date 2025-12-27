@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { clearSession, requireSession } from '@/lib/session';
-import { badgeCounts, uidFromToken } from '@/lib/socialStore';
+import { loadUserProfileSnapshot, badgeCounts, uidFromToken } from '@/lib/socialStore';
 
 export type ActiveTab =
   | 'discover'
@@ -102,10 +102,8 @@ export default function AppHeader(props: {
       const snap = loadUserProfileSnapshot(uid);
       const name = (snap?.displayName || snap?.username || snap?.email || '').toString().trim();
       if (name) return name;
-      return uid && uid !== 'anon' ? uid : '';
-    } catch {
-      return uid && uid !== 'anon' ? uid : '';
-    }
+    } catch {}
+    return uid && uid !== 'anon' ? uid : '';
   }, [uid]);
 
   useEffect(() => {
@@ -234,7 +232,7 @@ export default function AppHeader(props: {
             ) : null}
           </button>
 
-          <Link href="/discover" style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 800, textDecoration: 'none' }}>
+          <Link href="/discover" style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 800, textDecoration: 'none', maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {displayName ? `Welcome back, ${displayName}` : 'Welcome back'}
           </Link>
         </div>
