@@ -229,6 +229,15 @@ export function markMatchClicked(uid: string, matchId: string) {
   save(s);
 }
 
+export function isMatchClicked(uid: string, matchId: string): boolean {
+  const u = String(uid || '').trim();
+  const mid = String(matchId || '').trim();
+  if (!u || !mid) return false;
+  const s = load();
+  const map = (s.clickedMatchesByUser?.[u] || {}) as Record<string, boolean>;
+  return Boolean(map[mid]);
+}
+
 export function unreadCountForMatch(uid: string, matchId: string): number {
   const u = String(uid || '').trim();
   const mid = String(matchId || '').trim();
