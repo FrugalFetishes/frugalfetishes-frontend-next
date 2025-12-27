@@ -116,6 +116,13 @@ function placeholderAvatarDataUri(name: string) {
 type SwipeLabel = 'like' | 'pass' | null;
 
 export default function DiscoverPage() {
+  const myUid = useMemo(() => {
+    try {
+      return uidFromToken(requireSession());
+    } catch {
+      return 'anon';
+    }
+  }, []);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<string>('');
