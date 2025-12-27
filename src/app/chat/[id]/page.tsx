@@ -9,7 +9,6 @@ import {
   uidFromToken,
   getChat,
   addChatMessage,
-  incrementUnread,
   clearUnreadForChat,
   loadUserProfileSnapshot,
 } from "@/lib/socialStore";
@@ -123,10 +122,6 @@ export default function ChatPage() {
     // socialStore signature: addChatMessage(matchId, fromUid, toUid, text)
     try {
       addChatMessage(matchId, uid, otherUid, t);
-    } catch {}
-
-    try {
-      if (otherUid) incrementUnread(otherUid, matchId);
     } catch {}
 
     setText("");
