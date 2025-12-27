@@ -40,9 +40,32 @@ export default function ProfilePage() {
 
   const initialGallery: string[] = useMemo(() => {
     const g = (extras && (extras.gallery || extras.galleryUrls)) as any;
-    if (Array.isArray(g)) return g.filter(Boolean).map((x) => clampStr(x)).filter(Boolean);
-    return [];
-  }, [extras]);
+    const fromExtras = Array.isArray(g) ? g.filter(Boolean).map((x) => clampStr(x)).filter(Boolean) : [];
+
+    // Also honor legacy/alternate single-photo fields so the current profile picture
+    // shows up even if the gallery array isn't populated.
+    const legacySingles = [
+      (extras as any)?.primaryPhotoUrl,
+      (extras as any)?.photoUrl,
+      (extras as any)?.avatarUrl,
+      (snap as any)?.primaryPhotoUrl,
+      (snap as any)?.photoUrl,
+      (snap as any)?.photoURL,
+      (snap as any)?.avatarUrl,
+    ]
+      .map((x) => clampStr(x))
+      .filter(Boolean);
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const u of [...legacySingles, ...fromExtras]) {
+      if (!u) continue;
+      if (seen.has(u)) continue;
+      seen.add(u);
+      out.push(u);
+    }
+    return out;
+  }, [extras, snap]);
 
   const initialPrimary = useMemo(() => {
     const fromExtras = clampStr(extras?.primaryPhotoUrl || extras?.avatarUrl || '');
@@ -62,9 +85,15 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // keep primary in sync if gallery becomes empty or primary removed
-    if (primaryPhotoUrl && !gallery.includes(primaryPhotoUrl)) return;
-    if (!primaryPhotoUrl && gallery.length) setPrimaryPhotoUrl(gallery[0]);
+    // Keep primary in sync and always visible.
+    if (primaryPhotoUrl) {
+      if (!gallery.includes(primaryPhotoUrl)) {
+        setGallery((prev) => [primaryPhotoUrl, ...prev.filter((u) => u !== primaryPhotoUrl)]);
+        return;
+      }
+    } else {
+      if (gallery.length) setPrimaryPhotoUrl(gallery[0]);
+    }
   }, [gallery, primaryPhotoUrl]);
 
   function toast(msg: string) {
@@ -211,6 +240,26 @@ export default function ProfilePage() {
     fontWeight: 800,
   };
 
+  const primaryPreviewWrap: React.CSSProperties = {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(255,255,255,0.04)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  };
+
+  const primaryPreviewImg: React.CSSProperties = {
+    width: 84,
+    height: 84,
+    borderRadius: 14,
+    objectFit: 'cover',
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(0,0,0,0.25)',
+  };
+
   const thumbsWrap: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
@@ -333,6 +382,18 @@ export default function ProfilePage() {
               </button>
             </div>
           </div>
+
+          {primaryPhotoUrl ? (
+            <div style={primaryPreviewWrap}>
+              <img src={primaryPhotoUrl} alt="Profile" style={primaryPreviewImg} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, marginBottom: 2 }}>Current profile photo</div>
+                <div style={{ opacity: 0.75, fontSize: 12, lineHeight: 1.2 }}>
+                  Tap any photo below to set it as your profile pic.
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div style={thumbsWrap}>
             {gallery.length ? (
