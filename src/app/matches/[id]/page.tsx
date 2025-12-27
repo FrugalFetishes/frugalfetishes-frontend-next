@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import AppHeader from '@/components/AppHeader';
 import { requireSession } from '@/lib/session';
@@ -43,6 +43,13 @@ export default function MatchProfilePage() {
     } catch {
       return null;
     }
+  }, [myUid, matchId]);
+
+  useEffect(() => {
+    if (!matchId) return;
+    try {
+      markMatchClicked(myUid, matchId);
+    } catch {}
   }, [myUid, matchId]);
 
   const otherUid = useMemo(() => {
