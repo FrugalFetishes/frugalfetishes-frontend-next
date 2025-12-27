@@ -1,200 +1,123 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-
-import AppHeader from "@/components/AppHeader";
-import { requireSession } from "@/lib/session";
+import { useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import AppHeader from '@/components/AppHeader';
+import { requireSession } from '@/lib/session';
 import {
   uidFromToken,
   getMatchesFor,
   loadUserProfileSnapshot,
+  markMatchClicked,
   type Match,
-} from "@/lib/socialStore";
+} from '@/lib/socialStore';
 
-type ProfileLite = {
-  displayName?: string;
-  name?: string;
-  username?: string;
-  email?: string;
-  photoUrl?: string;
-  photo?: string;
-  avatarUrl?: string;
-  aboutMe?: string;
-  headline?: string;
-};
-
-type MatchRow = {
-  matchId: string;
-  otherUid: string;
-  name: string;
-  photo: string;
-  matchedAt?: number;
-};
-
-function shortUid(uid: string): string {
-  if (!uid) return "User";
-  if (uid.includes("@")) return uid.split("@")[0] || uid;
-  return uid.slice(0, 8);
+function placeholderAvatarDataUri(label: string) {
+  const seed = (label || 'U').trim().slice(0, 2).toUpperCase();
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#2a2a2a"/>
+        <stop offset="1" stop-color="#111"/>
+      </linearGradient>
+    </defs>
+    <rect width="160" height="160" rx="28" fill="url(#g)"/>
+    <text x="80" y="92" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+      font-size="56" font-weight="800" fill="#fff">${seed}</text>
+  </svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function displayNameFor(p: ProfileLite | null, otherUid: string): string {
-  const v =
-    p?.displayName ||
-    p?.name ||
-    p?.username ||
-    (p?.email ? p.email.split("@")[0] : "") ||
-    "";
-  return v.trim() || shortUid(otherUid);
-}
+export default function MatchProfilePage() {
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const matchId = String(params?.id || '').trim();
 
-function initialAvatarDataUri(label: string): string {
-  const letter = (label.trim()[0] || "?").toUpperCase();
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
-  <rect width="64" height="64" rx="32" ry="32" fill="#2b2b2b"/>
-  <text x="32" y="40" text-anchor="middle" font-size="28" font-family="Arial" fill="#ffffff">${letter}</text>
-</svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
+  const token = useMemo(() => requireSession(), []);
+  const myUid = useMemo(() => uidFromToken(token), [token]);
 
-function toMillis(v: any): number | undefined {
-  if (!v) return undefined;
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = Number(v);
-    if (!Number.isNaN(n)) return n;
-    const d = Date.parse(v);
-    if (!Number.isNaN(d)) return d;
-    return undefined;
-  }
-  // tolerate Firestore-like timestamps (seconds + nanoseconds)
-  const seconds = (v as any).seconds;
-  if (typeof seconds === "number") return seconds * 1000;
-  const ms = (v as any).toMillis;
-  if (typeof ms === "function") {
+  const match: Match | null = useMemo(() => {
     try {
-      return ms.call(v);
-    } catch {}
-  }
-  return undefined;
-}
-
-function otherUidFromMatch(uid: string, match: Match): string {
-  const a: string | undefined = (match as any).a ?? (match as any).userA ?? (match as any).uidA;
-  const b: string | undefined = (match as any).b ?? (match as any).userB ?? (match as any).uidB;
-  if (a && a !== uid) return a;
-  if (b && b !== uid) return b;
-  // last resort: try arrays/objects
-  const users: any = (match as any).users;
-  if (Array.isArray(users)) {
-    const other = users.find((x) => x && x !== uid);
-    if (typeof other === "string") return other;
-  }
-  return "";
-}
-
-export default function MatchesPage() {
-  const token = useMemo(() => {
-    try {
-      return requireSession();
+      const all = getMatchesFor(myUid);
+      return all.find((m) => m.id === matchId) || null;
     } catch {
-      return null as any;
+      return null;
     }
-  }, []);
+  }, [myUid, matchId]);
 
-  const uid = useMemo(() => uidFromToken((token ?? "") as string) || "anon", [token]);
+  const otherUid = useMemo(() => {
+    if (!match) return '';
+    const a = (match as any).a as string | undefined;
+    const b = (match as any).b as string | undefined;
+    if (!a || !b) return '';
+    return a === myUid ? b : b === myUid ? a : (a || b);
+  }, [match, myUid]);
 
-  const [rows, setRows] = useState<MatchRow[] | null>(null);
+  const snap = useMemo(() => (otherUid ? loadUserProfileSnapshot(otherUid) : null), [otherUid]);
+  const name = (snap?.displayName || snap?.fullName || otherUid || 'Match').toString();
+  const photo = (snap?.photoUrl || '').toString() || placeholderAvatarDataUri(name);
 
-  useEffect(() => {
-    let alive = true;
+  function onOpenChat() {
+    if (!matchId) return;
+    try {
+      markMatchClicked(myUid, matchId);
+    } catch {}
+    router.push(`/chat/${matchId}`);
+  }
 
-    (async () => {
-      try {
-        if (!uid) {
-          if (alive) setRows([]);
-          return;
-        }
+  if (!matchId) {
+    return (
+      <div className="ff-page">
+        <AppHeader active="matches" />
+        <main className="ff-shell">
+          <h1 className="ff-h1">Match</h1>
+          <div style={{ opacity: 0.85 }}>Missing match id.</div>
+        </main>
+      </div>
+    );
+  }
 
-        const matches = await getMatchesFor(uid);
-
-        const out: MatchRow[] = matches.map((m: Match) => {
-          const matchId = (m as any).id || (m as any).matchId || "";
-          const otherUid = otherUidFromMatch(uid, m) || "";
-          const p: ProfileLite | null = otherUid ? (loadUserProfileSnapshot(otherUid) as any) : null;
-
-          const name = displayNameFor(p, otherUid || "User");
-          const photo =
-            (p?.photoUrl || p?.avatarUrl || p?.photo || "").trim() || initialAvatarDataUri(name);
-
-          const matchedAt =
-            toMillis((m as any).createdAt) ??
-            toMillis((m as any).matchedAt) ??
-            toMillis((m as any).matchCreatedAt);
-
-          return {
-            matchId: String(matchId || `${uid}:${otherUid}`),
-            otherUid,
-            name,
-            photo,
-            matchedAt,
-          };
-        });
-
-        // newest first
-        out.sort((a, b) => (b.matchedAt || 0) - (a.matchedAt || 0));
-
-        if (alive) setRows(out);
-      } catch (e) {
-        // keep page alive even if one match is malformed
-        if (alive) setRows([]);
-        console.error("[matches] load failed", e);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, [uid]);
+  if (!match) {
+    return (
+      <div className="ff-page">
+        <AppHeader active="matches" />
+        <main className="ff-shell">
+          <h1 className="ff-h1">Match</h1>
+          <div style={{ opacity: 0.85, marginTop: 10 }}>
+            This match isn’t in your local list yet. Go back to Matches and open it again.
+          </div>
+          <button type="button" className="ff-btn" style={{ marginTop: 14 }} onClick={() => router.push('/matches')}>
+            Back to Matches
+          </button>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="ff-page">
       <AppHeader active="matches" />
-      <main className="ff-main">
-        <h1 className="ff-h1">Matches</h1>
-
-        {rows === null ? (
-          <div className="ff-muted">Loading…</div>
-        ) : rows.length === 0 ? (
-          <div className="ff-muted">
-            No matches yet. Swipe right on Discover and make sure the other account likes you back.
+      <main className="ff-shell" style={{ maxWidth: 920 }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <img
+            src={photo}
+            alt={name}
+            style={{ width: 88, height: 88, borderRadius: 18, objectFit: 'cover', background: 'rgba(255,255,255,0.08)' }}
+          />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, wordBreak: 'break-word' }}>{name}</div>
+            <div style={{ opacity: 0.7, fontSize: 12, marginTop: 6 }}>Match ID: {matchId}</div>
           </div>
-        ) : (
-          <div className="ff-list">
-            {rows.map((r) => {
-              const ts =
-                typeof r.matchedAt === "number"
-                  ? new Date(r.matchedAt).toLocaleString()
-                  : "New match";
+        </div>
 
-              return (
-                <div key={r.matchId} className="ff-row">
-                  <div className="ff-row-left">
-                    <img className="ff-avatar" src={r.photo} alt={r.name} />
-                    <div className="ff-row-text">
-                      <div className="ff-row-title">{r.name}</div>
-                      <div className="ff-muted">{ts}</div>
-                    </div>
-                  </div>
-
-                  <Link className="ff-btn" href={`/matches/m/${encodeURIComponent(r.matchId)}`}>
-                    Open
-                  </Link>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button type="button" className="ff-btn" onClick={onOpenChat} style={{ fontWeight: 900 }}>
+            Message
+          </button>
+          <button type="button" className="ff-btn" onClick={() => router.push('/matches')} style={{ opacity: 0.9 }}>
+            Back
+          </button>
+        </div>
       </main>
     </div>
   );
