@@ -7,7 +7,7 @@ import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
 
 
-import { uidFromToken, likeUser, upsertUserProfileSnapshot, loadUserProfileSnapshot, getProfileExtras } from '@/lib/socialStore';
+import { uidFromToken, likeUser } from '@/lib/socialStore';
 type Profile = {
   id: string;
   name: string;
@@ -36,6 +36,7 @@ function safeJsonParse<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
 
 function safeString(v: any, fallback: string = ''): string {
   try {
@@ -47,7 +48,6 @@ function safeString(v: any, fallback: string = ''): string {
   }
 }
 
-}
 
 function saveLS(key: string, value: any) {
   try {
