@@ -148,6 +148,17 @@ export default function DiscoverPage() {
   const current = profiles[idx] || null;
   const currentPhoto = current ? pickPhotoUrl(current) : null;
 
+  // Derived display fields for placeholders / expanded panel (kept purely client-side; no swipe logic changes)
+  const currentName = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      return safeString(anyCur?.displayName || anyCur?.name || anyCur?.fullName || anyCur?.email || anyCur?.id || 'User');
+    } catch {
+      return 'User';
+    }
+  }, [current]);
+
+
   const pillBtn: React.CSSProperties = {
     height: 36,
     padding: '0 12px',
