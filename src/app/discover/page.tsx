@@ -169,10 +169,34 @@ export default function DiscoverPage() {
     }
   }, [current]);
 
-  const currentCity = useMemo(() => {
+  const currentZip = useMemo(() => {
     try {
       const anyCur: any = current as any;
-      return safeString(anyCur?.city || anyCur?.location?.city || anyCur?.locationText || '');
+      return safeString(
+        anyCur?.zip ||
+          anyCur?.postalCode ||
+          anyCur?.zipcode ||
+          anyCur?.location?.zip ||
+          anyCur?.location?.postalCode ||
+          anyCur?.locationText ||
+          ''
+      );
+    } catch {
+      return '';
+    }
+  }, [current]);
+
+  const currentSex = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      const raw = safeString(anyCur?.sex || anyCur?.gender || anyCur?.genderIdentity || '').toLowerCase();
+      if (!raw) return '';
+      if (raw.startsWith('m')) return 'Male';
+      if (raw.startsWith('f')) return 'Female';
+      // tolerate 'man'/'woman' etc
+      if (raw.includes('male')) return 'Male';
+      if (raw.includes('female')) return 'Female';
+      return '';
     } catch {
       return '';
     }
@@ -626,7 +650,7 @@ export default function DiscoverPage() {
                   {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
                 </div>
                 <div style={badge}>
-                  <span style={{ opacity: 0.9 }}>{currentCity || '—'}</span>
+                  <span style={{ opacity: 0.9 }}>{currentZip || '—'}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
                   {currentAbout ? currentAbout : 'Swipe left/right, or swipe up to view profile.'}
@@ -701,8 +725,13 @@ export default function DiscoverPage() {
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>City</div>
-                <div style={{ opacity: 0.92 }}>{currentCity || '—'}</div>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
+                <div style={{ opacity: 0.92 }}>{currentZip || '—'}</div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Sex</div>
+                <div style={{ opacity: 0.92 }}>{currentSex || '—'}</div>
               </div>
             </div>
 
