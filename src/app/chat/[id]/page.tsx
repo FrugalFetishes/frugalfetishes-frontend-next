@@ -58,9 +58,15 @@ export default function ChatPage() {
   const uid = useMemo(() => uidFromToken(token) ?? "anon", [token]);
 
   const otherUid = useMemo(() => {
-    const parts = String(matchId).split("__");
+    const raw = String(matchId || "");
+    const core = raw.startsWith("m_") ? raw.slice(2) : raw;
+    const parts = core.split("__").filter(Boolean);
     if (parts.length !== 2) return "";
-    return parts[0] === uid ? parts[1] : parts[0];
+    const [a, b] = parts;
+    if (a === uid) return b;
+    if (b === uid) return a;
+    // fallback: if uid isn't part of the id for some reason
+    return a || b || "";
   }, [matchId, uid]);
 
   const other = useMemo<ProfileSnapshot>(() => {
