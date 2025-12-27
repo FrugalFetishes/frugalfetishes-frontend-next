@@ -226,7 +226,7 @@ export function incrementUnread(uid: string, matchId: string, amount: number = 1
   const mid = String(matchId || '').trim();
   if (!u || !mid) return;
   const s = load();
-  const map = ensureMap(s.unreadByUser, u, () => ({}));
+  const map = ensureMap(s.unreadByUser, u, () => ({} as Record<string, number>));
   map[mid] = clamp(map[mid] || 0) + clamp(amount);
   save(s);
 }
@@ -236,7 +236,7 @@ export function clearUnreadForChat(uid: string, matchId: string) {
   const mid = String(matchId || '').trim();
   if (!u || !mid) return;
   const s = load();
-  const map = ensureMap(s.unreadByUser, u, () => ({}));
+  const map = ensureMap(s.unreadByUser, u, () => ({} as Record<string, number>));
   map[mid] = 0;
   save(s);
 }
