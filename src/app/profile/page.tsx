@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AppHeader from '@/components/AppHeader';
 import { requireSession } from '@/lib/session';
 import {
@@ -11,114 +11,399 @@ import {
   setProfileExtras,
 } from '@/lib/socialStore';
 
+function clampStr(v: any): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  try { return String(v); } catch { return ''; }
+}
+
+function isDataUri(s: string) {
+  return typeof s === 'string' && s.startsWith('data:image/');
+}
+
+function ensureHttps(url: string) {
+  const u = clampStr(url).trim();
+  if (!u) return '';
+  if (isDataUri(u)) return u;
+  if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  // allow protocol-relative or bare domains
+  if (u.startsWith('//')) return 'https:' + u;
+  return 'https://' + u;
+}
+
 export default function ProfilePage() {
   const token = useMemo(() => requireSession(), []);
-  const uid = useMemo(() => uidFromToken(token), [token]);
+  const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
 
   const snap = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
   const extras = useMemo(() => getProfileExtras(uid), [uid]);
 
-  const [displayName, setDisplayName] = useState<string>(
-    String((snap?.displayName || extras?.displayName || '').toString())
-  );
-  const [fullName, setFullName] = useState<string>(String((snap?.fullName || extras?.fullName || '').toString()));
-  const [photoUrl, setPhotoUrl] = useState<string>(String((snap?.photoUrl || '').toString()));
-  const [headline, setHeadline] = useState<string>(String((extras?.headline || '').toString()));
-  const [about, setAbout] = useState<string>(String((extras?.about || '').toString()));
+  const initialGallery: string[] = useMemo(() => {
+    const g = (extras && (extras.gallery || extras.galleryUrls)) as any;
+    if (Array.isArray(g)) return g.filter(Boolean).map((x) => clampStr(x)).filter(Boolean);
+    return [];
+  }, [extras]);
 
-  function onSave() {
-    // Save snapshot (used by Matches/Messages display)
-    upsertUserProfileSnapshot(uid, {
-      id: uid,
-      displayName: displayName.trim(),
-      fullName: fullName.trim(),
-      photoUrl: photoUrl.trim(),
-      email: extras?.email,
-    });
+  const initialPrimary = useMemo(() => {
+    const fromExtras = clampStr(extras?.primaryPhotoUrl || extras?.avatarUrl || '');
+    const fromSnap = clampStr((snap as any)?.photoUrl || '');
+    return fromExtras || fromSnap || initialGallery[0] || '';
+  }, [extras, snap, initialGallery]);
 
-    // Save extras (account + subscription)
-    setProfileExtras(uid, {
-      displayName: displayName.trim(),
-      fullName: fullName.trim(),
-      headline: headline.trim(),
-      about: about.trim(),
-    });
+  const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extras?.displayName || ''));
+  const [fullName, setFullName] = useState<string>(clampStr(extras?.fullName || ''));
+  const [headline, setHeadline] = useState<string>(clampStr(extras?.headline || ''));
+  const [about, setAbout] = useState<string>(clampStr(extras?.about || ''));
+  const [primaryPhotoUrl, setPrimaryPhotoUrl] = useState<string>(clampStr(initialPrimary));
+  const [gallery, setGallery] = useState<string[]>(initialGallery);
 
-    alert('Saved');
+  const [newUrl, setNewUrl] = useState<string>('');
+  const [status, setStatus] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    // keep primary in sync if gallery becomes empty or primary removed
+    if (primaryPhotoUrl && !gallery.includes(primaryPhotoUrl)) return;
+    if (!primaryPhotoUrl && gallery.length) setPrimaryPhotoUrl(gallery[0]);
+  }, [gallery, primaryPhotoUrl]);
+
+  function toast(msg: string) {
+    setStatus(msg);
+    window.setTimeout(() => setStatus(''), 2200);
   }
 
-  const inputStyle: React.CSSProperties = {
+  function addUrlToGallery(raw: string) {
+    const url = ensureHttps(raw);
+    if (!url) return;
+    setGallery((prev) => {
+      const next = Array.from(new Set([url, ...prev])).slice(0, 9);
+      return next;
+    });
+    if (!primaryPhotoUrl) setPrimaryPhotoUrl(url);
+  }
+
+  function onPickFiles(files: FileList | null) {
+    if (!files || !files.length) return;
+    const max = Math.min(files.length, 6);
+    let idx = 0;
+
+    const readNext = () => {
+      if (idx >= max) return;
+      const f = files[idx++];
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        if (dataUrl && isDataUri(dataUrl)) {
+          setGallery((prev) => {
+            const next = [dataUrl, ...prev];
+            // keep unique but allow multiple different data URIs
+            const uniq: string[] = [];
+            for (const u of next) {
+              if (!u) continue;
+              if (uniq.includes(u)) continue;
+              uniq.push(u);
+              if (uniq.length >= 9) break;
+            }
+            return uniq;
+          });
+          if (!primaryPhotoUrl) setPrimaryPhotoUrl(dataUrl);
+        }
+        readNext();
+      };
+      reader.onerror = () => readNext();
+      reader.readAsDataURL(f);
+    };
+
+    readNext();
+  }
+
+  function removeFromGallery(url: string) {
+    setGallery((prev) => prev.filter((x) => x !== url));
+    if (primaryPhotoUrl === url) {
+      const next = gallery.filter((x) => x !== url)[0] || '';
+      setPrimaryPhotoUrl(next);
+    }
+  }
+
+  function save() {
+    try {
+      // Snapshot: keep it minimal (types)
+      upsertUserProfileSnapshot(uid, {
+        id: uid,
+        displayName: displayName.trim() || uid,
+        fullName: fullName.trim(),
+        email: '',
+        photoUrl: primaryPhotoUrl || '',
+        updatedAt: Date.now(),
+      } as any);
+
+      // Extras: richer profile + gallery
+      setProfileExtras(uid, {
+        displayName: displayName.trim(),
+        fullName: fullName.trim(),
+        headline: headline.trim(),
+        about: about.trim(),
+        primaryPhotoUrl: primaryPhotoUrl || '',
+        gallery: gallery,
+      });
+
+      toast('Saved!');
+    } catch (e: any) {
+      toast('Save failed');
+      console.error(e);
+    }
+  }
+
+  const pageWrap: React.CSSProperties = {
+    minHeight: '100vh',
+    padding: '18px 14px 30px',
+    display: 'flex',
+    justifyContent: 'center',
+  };
+
+  const card: React.CSSProperties = {
+    width: 'min(860px, 96vw)',
+    background: 'rgba(0,0,0,0.25)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: 18,
+    padding: 16,
+    boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+  };
+
+  const row: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 12,
+    marginTop: 12,
+  };
+
+  const label: React.CSSProperties = { fontSize: 12, opacity: 0.85, marginBottom: 6 };
+  const input: React.CSSProperties = {
     width: '100%',
     padding: '10px 12px',
-    borderRadius: 10,
-    border: '1px solid rgba(255,255,255,0.16)',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.12)',
     background: 'rgba(0,0,0,0.25)',
     color: 'white',
     outline: 'none',
   };
 
-  const labelStyle: React.CSSProperties = { fontSize: 12, opacity: 0.75, marginBottom: 6 };
+  const textarea: React.CSSProperties = {
+    ...input,
+    minHeight: 92,
+    resize: 'vertical',
+  };
+
+  const btn: React.CSSProperties = {
+    padding: '9px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.16)',
+    background: 'rgba(255,255,255,0.08)',
+    color: 'white',
+    cursor: 'pointer',
+    fontWeight: 700,
+  };
+
+  const btnSmall: React.CSSProperties = {
+    ...btn,
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 800,
+  };
+
+  const thumbsWrap: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
+    gap: 10,
+    marginTop: 10,
+  };
+
+  const thumb: React.CSSProperties = {
+    width: '100%',
+    aspectRatio: '1 / 1',
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+    position: 'relative',
+    background: 'rgba(0,0,0,0.25)',
+    cursor: 'pointer',
+  };
+
+  const thumbImg: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
+  };
+
+  const selectedPill: React.CSSProperties = {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    padding: '4px 8px',
+    borderRadius: 999,
+    background: 'rgba(0,0,0,0.55)',
+    border: '1px solid rgba(255,255,255,0.22)',
+    fontSize: 11,
+    fontWeight: 900,
+  };
+
+  const delBtn: React.CSSProperties = {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(0,0,0,0.45)',
+    color: 'white',
+    cursor: 'pointer',
+    fontWeight: 900,
+    lineHeight: '26px',
+    textAlign: 'center',
+  };
+
+  const statusStyle: React.CSSProperties = {
+    position: 'fixed',
+    top: 86,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 99,
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(0,0,0,0.65)',
+    color: 'white',
+    fontWeight: 800,
+  };
 
   return (
-    <div className="ff-page">
+    <>
       <AppHeader active="profile" />
-      <main className="ff-shell" style={{ maxWidth: 920 }}>
-        <h1 className="ff-h1">Profile</h1>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <div>
-            <div style={labelStyle}>Display Name</div>
-            <input style={inputStyle} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+      {status ? <div style={statusStyle}>{status}</div> : null}
+
+      <div style={pageWrap}>
+        <div style={card}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
+              <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
+            </div>
+            <button type="button" style={btn} onClick={save}>
+              Save
+            </button>
           </div>
 
-          <div>
-            <div style={labelStyle}>Full Name</div>
-            <input style={inputStyle} value={fullName} onChange={(e) => setFullName(e.target.value)} />
+          <div style={{ marginTop: 14, fontWeight: 900 }}>Photos</div>
+          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
+            Upload photos, delete them, and click a photo to set it as your profile picture.
           </div>
 
-          <div style={{ gridColumn: '1 / -1' }}>
-            <div style={labelStyle}>Photo URL</div>
-            <input style={inputStyle} value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} />
-            <div style={{ marginTop: 10, display: 'flex', gap: 12, alignItems: 'center' }}>
-              {photoUrl ? (
-                <img
-                  src={photoUrl}
-                  alt="Profile"
-                  style={{ width: 72, height: 72, borderRadius: 16, objectFit: 'cover' }}
-                />
-              ) : (
-                <div style={{ width: 72, height: 72, borderRadius: 16, background: 'rgba(255,255,255,0.08)' }} />
-              )}
-              <div style={{ opacity: 0.8, fontSize: 12 }}>UID: {uid}</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => onPickFiles(e.target.files)}
+            />
+            <button type="button" style={btnSmall} onClick={() => fileInputRef.current?.click()}>
+              Upload images
+            </button>
+
+            <div style={{ display: 'flex', gap: 8, flex: '1 1 320px', alignItems: 'center' }}>
+              <input
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                placeholder="Paste image URL (https://...)"
+                style={input}
+              />
+              <button
+                type="button"
+                style={btnSmall}
+                onClick={() => {
+                  addUrlToGallery(newUrl);
+                  setNewUrl('');
+                }}
+              >
+                Add
+              </button>
             </div>
           </div>
 
-          <div style={{ gridColumn: '1 / -1' }}>
-            <div style={labelStyle}>Headline</div>
-            <input style={inputStyle} value={headline} onChange={(e) => setHeadline(e.target.value)} />
+          <div style={thumbsWrap}>
+            {gallery.length ? (
+              gallery.map((url) => {
+                const selected = url === primaryPhotoUrl;
+                return (
+                  <div
+                    key={url}
+                    style={{
+                      ...thumb,
+                      outline: selected ? '2px solid rgba(255,255,255,0.65)' : 'none',
+                    }}
+                    onClick={() => setPrimaryPhotoUrl(url)}
+                    role="button"
+                    aria-label={selected ? 'Selected profile photo' : 'Set as profile photo'}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="Photo" style={thumbImg} draggable={false} />
+                    {selected ? <div style={selectedPill}>Profile pic</div> : null}
+                    <div
+                      style={delBtn}
+                      role="button"
+                      aria-label="Delete photo"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromGallery(url);
+                      }}
+                    >
+                      ×
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ opacity: 0.8, padding: 10, fontSize: 13 }}>No photos yet. Upload or add a URL.</div>
+            )}
           </div>
 
-          <div style={{ gridColumn: '1 / -1' }}>
-            <div style={labelStyle}>About</div>
-            <textarea
-              style={{ ...inputStyle, minHeight: 110, resize: 'vertical' }}
-              value={about}
-              onChange={(e) => setAbout(e.target.value)}
-            />
+          <div style={row}>
+            <div>
+              <div style={label}>Display name</div>
+              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={input} />
+            </div>
+            <div>
+              <div style={label}>Full name</div>
+              <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={input} />
+            </div>
+          </div>
+
+          <div style={row}>
+            <div>
+              <div style={label}>Headline</div>
+              <input value={headline} onChange={(e) => setHeadline(e.target.value)} style={input} />
+            </div>
+            <div>
+              <div style={label}>Profile photo URL (auto from selection)</div>
+              <input
+                value={primaryPhotoUrl}
+                onChange={(e) => setPrimaryPhotoUrl(e.target.value)}
+                placeholder="Select a photo above or paste URL"
+                style={input}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <div style={label}>About</div>
+            <textarea value={about} onChange={(e) => setAbout(e.target.value)} style={textarea} />
           </div>
         </div>
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-          <button
-            type="button"
-            className="ff-btn"
-            onClick={onSave}
-            style={{ padding: '10px 14px', borderRadius: 12, fontWeight: 800 }}
-          >
-            Save
-          </button>
-        </div>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
