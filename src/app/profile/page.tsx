@@ -73,6 +73,30 @@ export default function ProfilePage() {
     return fromExtras || fromSnap || initialGallery[0] || '';
   }, [extras, snap, initialGallery]);
 
+  const initialAge = useMemo(() => {
+    const n = Number((extras as any)?.age ?? (snap as any)?.age ?? 0);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }, [extras, snap]);
+
+  const initialSex = useMemo(() => {
+    const v = String((extras as any)?.sex ?? (snap as any)?.sex ?? 'any');
+    return (v || 'any').toLowerCase();
+  }, [extras, snap]);
+
+  const initialCity = useMemo(() => {
+    return String((extras as any)?.city ?? (snap as any)?.city ?? '').toString();
+  }, [extras, snap]);
+
+  const initialLocation = useMemo(() => {
+    const loc = (extras as any)?.location ?? (snap as any)?.location;
+    if (loc && typeof loc === 'object' && typeof (loc as any).lat === 'number' && typeof (loc as any).lng === 'number') return loc as { lat: number; lng: number };
+    return null as null | { lat: number; lng: number };
+  }, [extras, snap]);
+
+  const [age, setAge] = useState<number>(initialAge);
+  const [sex, setSex] = useState<string>(initialSex);
+  const [city, setCity] = useState<string>(initialCity);
+
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extras?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extras?.fullName || ''));
   const [headline, setHeadline] = useState<string>(clampStr(extras?.headline || ''));
@@ -398,7 +422,7 @@ export default function ProfilePage() {
           <div style={thumbsWrap}>
             {gallery.length ? (
               gallery.map((url) => {
-                const selected = url === primaryPhotoUrl;
+                const selected = normalizePhotoUrl(url) === effectivePrimary;
                 return (
                   <div
                     key={url}
@@ -442,6 +466,37 @@ export default function ProfilePage() {
               <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={input} />
             </div>
           </div>
+
+
+          <div style={row}>
+            <div>
+              <div style={label}>Sex</div>
+              <select value={sex} onChange={(e) => setSex(e.target.value)} style={input as any}>
+                <option value="any">Any</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="nonbinary">Non-binary</option>
+              </select>
+            </div>
+            <div>
+              <div style={label}>Age</div>
+              <input
+                value={age ? String(age) : ''}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setAge(Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+                }}
+                placeholder="e.g. 28"
+                style={input}
+                inputMode="numeric"
+              />
+            </div>
+            <div>
+              <div style={label}>City</div>
+              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Miami" style={input} />
+            </div>
+          </div>
+
 
           <div style={row}>
             <div>
