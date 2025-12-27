@@ -200,7 +200,7 @@ export default function DiscoverPage() {
           photos: p.photos,
           gallery: p.gallery,
         }))
-        .filter((p) => p.id);
+        .filter((p) => p.id && p.id !== myUid);
 
       if (list.length) {
         setProfiles(list);
