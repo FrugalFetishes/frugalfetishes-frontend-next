@@ -94,6 +94,17 @@ export default function ChatPage() {
     }
   }, [otherUid]);
 
+  const myProfile = useMemo(() => loadUserProfileSnapshot(myUid), [myUid]);
+  const myName = useMemo(() => {
+    const snap: any = myProfile as any;
+    return String(snap?.displayName ?? snap?.username ?? snap?.handle ?? 'You');
+  }, [myProfile]);
+  const myPhoto = useMemo(() => {
+    const snap: any = myProfile as any;
+    return String(snap?.photoUrl ?? snap?.photoURL ?? snap?.avatarUrl ?? snap?.primaryPhotoUrl ?? '');
+  }, [myProfile]);
+
+
   const otherName = useMemo(() => {
     const dn = asString(otherProfile?.displayName);
     const fn = asString(otherProfile?.fullName);
@@ -394,13 +405,30 @@ export default function ChatPage() {
 
                 return (
                   <div key={m.id} style={{ ...rowStyle, justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
-                    {!isMine ? (
+                    {(isMine ? myPhoto : otherPhoto) ? (
                       <img
-                        src={otherPhoto}
-                        alt={otherName}
+                        src={isMine ? myPhoto : otherPhoto}
+                        alt={isMine ? myName : otherName}
                         style={{ ...avatarStyle, width: 28, height: 28, alignSelf: 'flex-end' }}
                       />
-                    ) : null}
+                    ) : (
+                      <div
+                        style={{
+                          ...avatarStyle,
+                          width: 28,
+                          height: 28,
+                          alignSelf: 'flex-end',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          background: 'rgba(255,255,255,0.10)',
+                        }}
+                      >
+                        {(isMine ? myName : otherName).slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
 
                     <div style={bubble}>
                       <div>{m.text}</div>
