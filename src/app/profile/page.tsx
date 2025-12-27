@@ -31,6 +31,10 @@ function ensureHttps(url: string) {
   return 'https://' + u;
 }
 
+function normalizePhotoUrl(url: string) {
+  return ensureHttps(url).trim();
+}
+
 export default function ProfilePage() {
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
