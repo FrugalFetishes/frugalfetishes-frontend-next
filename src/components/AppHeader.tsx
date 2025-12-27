@@ -258,7 +258,7 @@ export default function AppHeader(props: {
           </div>
 
           <div
-            style={active === 'matches' || active === 'messages' ? itemActive : item}
+            style={active === 'matches' || active === 'messages' ? rowActiveStyle : rowStyle}
             onClick={() => go('/matches')}
           >
             <span>Inbox</span>
