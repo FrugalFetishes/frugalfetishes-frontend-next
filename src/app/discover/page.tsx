@@ -36,6 +36,17 @@ function safeJsonParse<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+
+function safeString(v: any, fallback: string = ''): string {
+  try {
+    if (v === undefined || v === null) return fallback;
+    const s = String(v).trim();
+    return s ? s : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 }
 
 function saveLS(key: string, value: any) {
@@ -136,37 +147,6 @@ export default function DiscoverPage() {
 
   const current = profiles[idx] || null;
   const currentPhoto = current ? pickPhotoUrl(current) : null;
-
-  // Full profile details for the card user (keeps swipe-up info in sync with their Profile page)
-  const currentSnap = useMemo(() => {
-    try {
-      return current ? loadUserProfileSnapshot(current.id) : null;
-    } catch {
-      return null;
-    }
-  }, [current?.id]);
-
-  const currentExtras = useMemo(() => {
-    try {
-      return current ? getProfileExtras(current.id) : null;
-    } catch {
-      return null;
-    }
-  }, [current?.id]);
-
-  const currentName = useMemo(() => safeString(currentSnap?.displayName || currentExtras?.displayName || current?.name || 'Unknown'), [currentSnap, currentExtras, current]);
-  const currentAge = useMemo(() => {
-    const v: any = currentExtras?.age ?? (current as any)?.age;
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  }, [currentExtras, current]);
-  const currentCity = useMemo(() => safeString(currentExtras?.city || (current as any)?.city || ''), [currentExtras, current]);
-  const currentBio = useMemo(() => safeString(currentExtras?.bio || currentExtras?.headline || (current as any)?.bio || ''), [currentExtras, current]);
-  const currentPrimaryPhoto = useMemo(() => {
-    const u = (currentExtras?.primaryPhotoUrl || currentExtras?.photoUrl || currentSnap?.photoUrl || (current as any)?.photoUrl || (current as any)?.avatarUrl || (current as any)?.primaryPhotoUrl || '');
-    return safeString(u);
-  }, [currentExtras, currentSnap, current]);
-
 
   const pillBtn: React.CSSProperties = {
     height: 36,
@@ -591,8 +571,8 @@ export default function DiscoverPage() {
 
               {!currentPhoto ? (
                 <img
-                  src={placeholderAvatarDataUri(current.name)}
-                  alt={`${current.name}'s photo`}
+                  src={placeholderAvatarDataUri(currentName)}
+                  alt={`${currentName}'s photo`}
                   style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9 }}
                 />
               ) : null}
@@ -601,14 +581,14 @@ export default function DiscoverPage() {
 
               <div style={infoStyle}>
                 <div style={nameStyle}>
-                  {current.name}
-                  {typeof current.age === 'number' ? `, ${current.age}` : ''}
+                  {currentName}
+                  {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
                 </div>
                 <div style={badge}>
                   <span style={{ opacity: 0.9 }}>{currentCity || '—'}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
-                  {current.bio ? current.bio : 'Swipe left/right, or swipe up to view profile.'}
+                  {currentAbout ? currentAbout : 'Swipe left/right, or swipe up to view profile.'}
                 </div>
               </div>
 
@@ -665,8 +645,8 @@ export default function DiscoverPage() {
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ fontSize: 22, fontWeight: 900 }}>
-                {current.name}
-                {typeof current.age === 'number' ? `, ${current.age}` : ''}
+                {currentName}
+                {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
               </div>
               <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
                 ↓ Back
@@ -676,7 +656,7 @@ export default function DiscoverPage() {
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{currentBio || 'No bio yet.'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{currentAbout || 'No bio yet.'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
