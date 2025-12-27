@@ -7,7 +7,7 @@ import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
 
 
-import { uidFromToken, likeUser, upsertUserProfileSnapshot } from '@/lib/socialStore';
+import { uidFromToken, likeUser, upsertUserProfileSnapshot, loadUserProfileSnapshot, getProfileExtras } from '@/lib/socialStore';
 type Profile = {
   id: string;
   name: string;
@@ -136,6 +136,37 @@ export default function DiscoverPage() {
 
   const current = profiles[idx] || null;
   const currentPhoto = current ? pickPhotoUrl(current) : null;
+
+  // Full profile details for the card user (keeps swipe-up info in sync with their Profile page)
+  const currentSnap = useMemo(() => {
+    try {
+      return current ? loadUserProfileSnapshot(current.id) : null;
+    } catch {
+      return null;
+    }
+  }, [current?.id]);
+
+  const currentExtras = useMemo(() => {
+    try {
+      return current ? getProfileExtras(current.id) : null;
+    } catch {
+      return null;
+    }
+  }, [current?.id]);
+
+  const currentName = useMemo(() => safeString(currentSnap?.displayName || currentExtras?.displayName || current?.name || 'Unknown'), [currentSnap, currentExtras, current]);
+  const currentAge = useMemo(() => {
+    const v: any = currentExtras?.age ?? (current as any)?.age;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [currentExtras, current]);
+  const currentCity = useMemo(() => safeString(currentExtras?.city || (current as any)?.city || ''), [currentExtras, current]);
+  const currentBio = useMemo(() => safeString(currentExtras?.bio || currentExtras?.headline || (current as any)?.bio || ''), [currentExtras, current]);
+  const currentPrimaryPhoto = useMemo(() => {
+    const u = (currentExtras?.primaryPhotoUrl || currentExtras?.photoUrl || currentSnap?.photoUrl || (current as any)?.photoUrl || (current as any)?.avatarUrl || (current as any)?.primaryPhotoUrl || '');
+    return safeString(u);
+  }, [currentExtras, currentSnap, current]);
+
 
   const pillBtn: React.CSSProperties = {
     height: 36,
@@ -574,7 +605,7 @@ export default function DiscoverPage() {
                   {typeof current.age === 'number' ? `, ${current.age}` : ''}
                 </div>
                 <div style={badge}>
-                  <span style={{ opacity: 0.9 }}>{current.city || '—'}</span>
+                  <span style={{ opacity: 0.9 }}>{currentCity || '—'}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
                   {current.bio ? current.bio : 'Swipe left/right, or swipe up to view profile.'}
@@ -645,12 +676,12 @@ export default function DiscoverPage() {
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{current.bio || 'No bio yet.'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{currentBio || 'No bio yet.'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>City</div>
-                <div style={{ opacity: 0.92 }}>{current.city || '—'}</div>
+                <div style={{ opacity: 0.92 }}>{currentCity || '—'}</div>
               </div>
             </div>
 
