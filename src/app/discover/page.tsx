@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import AppHeader from '@/components/AppHeader';
 import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
+import { uidFromToken, likeUser, upsertUserProfileSnapshot } from '@/lib/socialStore';
 
 type Profile = {
   id: string;
@@ -25,7 +25,6 @@ type Profile = {
 
 const DECK_KEY = 'ff_deck_profiles_v2';
 const IDX_KEY = 'ff_deck_idx_v2';
-const MATCHES_KEY = 'ff_matches_v2';
 
 function safeJsonParse<T>(raw: string | null, fallback: T): T {
   try {
@@ -122,11 +121,27 @@ export default function DiscoverPage() {
   const [busy, setBusy] = useState(false);
   const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
 
+  const token = useMemo(() => requireSession(), []);
+  const myUid = useMemo(() => uidFromToken(token), [token]);
+
   const drag = useRef({ active: false, x0: 0, y0: 0, dx: 0, dy: 0 });
   const [dragXY, setDragXY] = useState({ x: 0, y: 0 });
 
   const current = profiles[idx] || null;
   const currentPhoto = current ? pickPhotoUrl(current) : null;
+
+  const topNavStyle: React.CSSProperties = {
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
+    padding: '10px 14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backdropFilter: 'blur(10px)',
+    background: 'linear-gradient(180deg, rgba(12, 6, 20, 0.75), rgba(12, 6, 20, 0.35))',
+    borderBottom: '1px solid rgba(255,255,255,0.08)',
+  };
 
   const pillBtn: React.CSSProperties = {
     height: 36,
@@ -193,6 +208,13 @@ export default function DiscoverPage() {
         }))
         .filter((p) => p.id);
 
+      // Cache profile snapshots locally for Matches/Messages display (name + photo).
+      try {
+        for (const p of list) {
+          upsertUserProfileSnapshot(p.id, { id: p.id, displayName: p.name, photoUrl: pickPhotoUrl(p) || undefined });
+        }
+      } catch {}
+
       if (list.length) {
         setProfiles(list);
         setIdx(0);
@@ -251,23 +273,6 @@ export default function DiscoverPage() {
     }
   }
 
-  function persistLocalMatch(p: Profile) {
-    try {
-      const list = loadLS<any[]>(MATCHES_KEY, []);
-      if (list.some((m) => m?.userId === p.id)) return;
-      list.unshift({
-        id: `m_${p.id}`,
-        userId: p.id,
-        name: p.name,
-        age: p.age,
-        city: p.city,
-        photoUrl: pickPhotoUrl(p),
-        matchedAt: Date.now(),
-      });
-      saveLS(MATCHES_KEY, list);
-    } catch {}
-  }
-
   function nextCard() {
     setIdx((i) => {
       const n = i + 1;
@@ -281,7 +286,7 @@ export default function DiscoverPage() {
 
   function decide(decision: 'like' | 'pass') {
     if (!current) return;
-    if (decision === 'like') persistLocalMatch(current);
+    if (decision === 'like') { try { likeUser(myUid, current.id); } catch {} }
     void sendDecision(decision, current.id);
     nextCard();
   }
@@ -509,19 +514,57 @@ export default function DiscoverPage() {
 
   return (
     <div style={containerStyle}>
-      <AppHeader active="discover" />
+      <div style={topNavStyle}>
+        <button
+          type="button"
+          aria-label="Menu"
+          style={iconBtn}
+          onClick={() => {
+            const el = document.getElementById('ff-menu');
+            if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+          }}
+        >
+          ☰
+        </button>
 
-      {/* Debug controls (temporary) */}
-      <div style={{ padding: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button type="button" style={pillBtn} onClick={resetDeck}>
-          ↺ Reset deck
-        </button>
-        <button type="button" style={pillBtn} onClick={() => void fetchFeed()} disabled={busy}>
-          ⟳ Refresh
-        </button>
-        <Link href="/matches" style={{ ...pillBtn, textDecoration: 'none' }}>
-          💬 Matches
-        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img
+            src="/FFmenuheaderlogo.png"
+            alt="FrugalFetishes"
+            style={{ height: 26, width: 'auto', opacity: 0.95 }}
+            onError={(e: any) => {
+              // prevent infinite 404 spam
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+          <div style={{ fontWeight: 800, opacity: 0.95 }}>Discover</div>
+        </div>
+
+        <div style={{ width: 42 }} />
+      </div>
+
+      <div id="ff-menu" style={{ display: 'none' }}>
+        <div style={{ padding: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" style={pillBtn} onClick={resetDeck}>
+            ↺ Reset deck
+          </button>
+          <button type="button" style={pillBtn} onClick={() => void fetchFeed()} disabled={busy}>
+            ⟳ Refresh
+          </button>
+          <Link href="/matches" style={{ ...pillBtn, textDecoration: 'none' }}>
+            💬 Matches
+          </Link>
+          <button
+            type="button"
+            style={pillBtn}
+            onClick={() => {
+              clearSession();
+              window.location.href = '/login';
+            }}
+          >
+            ⇦ Logout
+          </button>
+        </div>
       </div>
 
       {status ? <div style={topToast}>{status}</div> : null}
