@@ -257,14 +257,17 @@ export function addChatMessage(matchId: string, a: any, b?: any, c?: any) {
   const mid = String(matchId || '').trim();
   if (!mid) return;
 
+  // Supports:
+  // 1) addChatMessage(matchId, { fromUserId, toUserId?, text })
+  // 2) addChatMessage(matchId, fromUid, toUid, text)
   let fromUserId = '';
   let toUserId: string | undefined = undefined;
   let text = '';
 
   if (typeof a === 'object' && a) {
-    fromUserId = String(a.fromUserId || a.from || a.fromUid || a.fromUser || a.fromUserID || '').trim();
-    toUserId = a.toUserId ? String(a.toUserId).trim() : undefined;
-    text = String(a.text || '').trim();
+    fromUserId = String((a as any).fromUserId || (a as any).from || (a as any).fromUid || '').trim();
+    toUserId = (a as any).toUserId ? String((a as any).toUserId).trim() : undefined;
+    text = String((a as any).text || '').trim();
   } else {
     fromUserId = String(a || '').trim();
     toUserId = b != null ? String(b).trim() : undefined;
@@ -272,6 +275,18 @@ export function addChatMessage(matchId: string, a: any, b?: any, c?: any) {
   }
 
   if (!fromUserId || !text) return;
+
+  // If toUserId missing, derive it from matchId shape: "m_<u1>__<u2>"
+  if (!toUserId) {
+    try {
+      const raw = mid.startsWith('m_') ? mid.slice(2) : mid;
+      const parts = raw.split('__');
+      if (parts.length === 2) {
+        const [u1, u2] = parts;
+        toUserId = (fromUserId === u1 ? u2 : fromUserId === u2 ? u1 : undefined);
+      }
+    } catch {}
+  }
 
   const s = load();
   const arr = ensureMap(s.chatsByMatch, mid, () => []);
@@ -283,6 +298,13 @@ export function addChatMessage(matchId: string, a: any, b?: any, c?: any) {
     createdAt: now(),
   };
   arr.push(msg);
+
+  // Increment unread for recipient so AppHeader badgeCounts updates.
+  if (toUserId && toUserId !== fromUserId) {
+    const umap = ensureMap(s.unreadByUser, toUserId, () => ({} as Record<string, number>));
+    umap[mid] = clamp(umap[mid] || 0) + 1;
+  }
+
   save(s);
 }
 
