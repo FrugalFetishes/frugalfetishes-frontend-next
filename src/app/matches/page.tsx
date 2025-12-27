@@ -9,6 +9,7 @@ import {
   uidFromToken,
   getMatchesFor,
   loadUserProfileSnapshot,
+  markMatchClicked,
   type Match,
 } from "@/lib/socialStore";
 
@@ -38,7 +39,15 @@ function shortUid(uid: string): string {
   return uid.slice(0, 8);
 }
 
-function displayNameFor(p: ProfileLite | null, otherUid: string): string {
+function displayNameFor(p: ProfileLite | null, otherUid: string, match?: any): string {
+  const fromMatch =
+    match?.otherDisplayName ||
+    match?.otherName ||
+    match?.displayName ||
+    match?.fullName ||
+    match?.name;
+  if (typeof fromMatch === 'string' && fromMatch.trim()) return fromMatch.trim();
+
   const v =
     p?.displayName ||
     p?.name ||
@@ -123,7 +132,7 @@ export default function MatchesPage() {
           const otherUid = otherUidFromMatch(uid, m) || "";
           const p: ProfileLite | null = otherUid ? (loadUserProfileSnapshot(otherUid) as any) : null;
 
-          const name = displayNameFor(p, otherUid || "User");
+          const name = displayNameFor(p, otherUid || "User", m);
           const photo =
             (p?.photoUrl || p?.avatarUrl || p?.photo || "").trim() || initialAvatarDataUri(name);
 
@@ -187,7 +196,15 @@ export default function MatchesPage() {
                     </div>
                   </div>
 
-                  <Link className="ff-btn" href={`/matches/${encodeURIComponent(r.matchId)}`}>
+                  <Link
+                    className="ff-btn"
+                    href={`/matches/${encodeURIComponent(r.matchId)}`}
+                    onClick={() => {
+                      try {
+                        markMatchClicked(myUid, r.matchId);
+                      } catch {}
+                    }}
+                  >
                     Open
                   </Link>
                 </div>
