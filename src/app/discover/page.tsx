@@ -159,6 +159,36 @@ export default function DiscoverPage() {
   }, [current]);
 
 
+  const currentAge = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      const n = Number(anyCur?.age);
+      return Number.isFinite(n) ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [current]);
+
+  const currentCity = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      return safeString(anyCur?.city || anyCur?.location?.city || anyCur?.locationText || '');
+    } catch {
+      return '';
+    }
+  }, [current]);
+
+  const currentAbout = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      return safeString(anyCur?.about || anyCur?.bio || anyCur?.headline || anyCur?.description || '');
+    } catch {
+      return '';
+    }
+  }, [current]);
+
+
+
   const pillBtn: React.CSSProperties = {
     height: 36,
     padding: '0 12px',
