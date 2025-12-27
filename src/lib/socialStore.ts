@@ -208,7 +208,7 @@ export function markMatchClicked(uid: string, matchId: string) {
   const mid = String(matchId || '').trim();
   if (!u || !mid) return;
   const s = load();
-  const map = ensureMap(s.clickedMatchesByUser, u, () => ({}));
+  const map = ensureMap(s.clickedMatchesByUser, u, () => ({} as Record<string, boolean>));
   map[mid] = true;
   save(s);
 }
