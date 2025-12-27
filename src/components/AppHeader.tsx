@@ -85,6 +85,9 @@ export default function AppHeader(props: {
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState<Counts>({ total: 0, matches: 0, messages: 0 });
 
+  const inboxBadge = clamp(counts.matches) + clamp(counts.messages);
+
+
   const uid = useMemo(() => {
     try {
       const token = requireSession();
@@ -255,21 +258,11 @@ export default function AppHeader(props: {
           </div>
 
           <div
-            style={active === 'matches' ? rowActiveStyle : rowStyle}
+            style={active === 'matches' || active === 'messages' ? itemActive : item}
             onClick={() => go('/matches')}
-            role="menuitem"
           >
-            <span>Matches</span>
-            <Badge n={counts.matches} />
-          </div>
-
-          <div
-            style={active === 'messages' ? rowActiveStyle : rowStyle}
-            onClick={() => go('/messages')}
-            role="menuitem"
-          >
-            <span>Messages</span>
-            <Badge n={counts.messages} />
+            <span>Inbox</span>
+            {inboxBadge > 0 ? <span style={badge}>{inboxBadge}</span> : null}
           </div>
 
           <div style={{ padding: '6px 8px', fontSize: 11, opacity: 0.7, marginTop: 4 }}>Search</div>
