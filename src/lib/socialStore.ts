@@ -5,7 +5,23 @@ type ProfileSnapshot = {
   displayName?: string;
   fullName?: string;
   email?: string;
+
+  // Photos
   photoUrl?: string;
+  primaryPhotoUrl?: string;
+  gallery?: string[];
+
+  // Demographics
+  age?: number;
+  sex?: 'any' | 'male' | 'female' | 'nonbinary' | string;
+  city?: string;
+  location?: { lat: number; lng: number };
+
+  // Optional profile text
+  headline?: string;
+  about?: string;
+  bio?: string;
+
   updatedAt?: number;
 };
 
@@ -211,11 +227,6 @@ export function markMatchClicked(uid: string, matchId: string) {
   const map = ensureMap(s.clickedMatchesByUser, u, () => ({} as Record<string, boolean>));
   map[mid] = true;
   save(s);
-}
-
-export function isMatchClicked(uid: string, matchId: string): boolean {
-  const s = load();
-  return Boolean(s.clickedMatchesByUser?.[uid]?.[matchId]);
 }
 
 export function unreadCountForMatch(uid: string, matchId: string): number {
