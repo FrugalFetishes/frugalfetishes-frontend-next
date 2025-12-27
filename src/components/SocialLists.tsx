@@ -259,7 +259,7 @@ export function SocialMatchesLayout(props: { myUid: string }) {
   };
 
   return (
-    <div style={{ width: '100%' }}>
+    <div style={{ width: '100%', marginTop: -8 }}>
       <div style={sectionTitle}>Matches</div>
 
       <div style={subTitle}>New matches</div>
@@ -294,17 +294,39 @@ export function SocialMatchesLayout(props: { myUid: string }) {
               <div style={{ position: 'absolute', left: 10, bottom: 46, fontWeight: 900, fontSize: 16 }}>
                 {r.otherName}
               </div>
-              <button
-                type="button"
-                style={waveBtn}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  router.push(`/chat/${encodeURIComponent(r.matchId)}`);
+              <div
+                style={{
+                  position: 'absolute',
+                  left: 8,
+                  right: 8,
+                  bottom: 8,
+                  display: 'flex',
+                  gap: 8,
                 }}
               >
-                Message
-              </button>
+                <button
+                  type="button"
+                  style={{ ...waveBtn, flex: 1 }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    router.push(`/chat/${encodeURIComponent(r.matchId)}?preset=wave`);
+                  }}
+                >
+                  Wave…
+                </button>
+                <button
+                  type="button"
+                  style={{ ...waveBtn, flex: 1 }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    router.push(`/chat/${encodeURIComponent(r.matchId)}`);
+                  }}
+                >
+                  Message
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -344,6 +366,54 @@ export function SocialMatchesLayout(props: { myUid: string }) {
 
               <div style={metaRight}>
                 <div style={{ opacity: 0.75, fontSize: 12, fontWeight: 700 }}>{formatTime(r.lastAt)}</div>
+                {!r.lastText ? (
+                  <button
+                    type="button"
+                    style={{
+                      marginTop: 6,
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: '1px solid rgba(255,255,255,0.14)',
+                      background: 'rgba(255,255,255,0.08)',
+                      color: 'rgba(255,255,255,0.95)',
+                      fontWeight: 800,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      width: 'fit-content',
+                      alignSelf: 'flex-end',
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      router.push(`/chat/${encodeURIComponent(r.matchId)}?preset=hi`);
+                    }}
+                  >
+                    Say hi
+                  </button>
+                ) : null}
+                {!r.lastText ? (
+                  <button
+                    type="button"
+                    style={{
+                      marginTop: 6,
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: '1px solid rgba(255,255,255,0.14)',
+                      background: 'rgba(255,255,255,0.06)',
+                      color: 'rgba(255,255,255,0.92)',
+                      fontWeight: 800,
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      router.push(`/chat/${encodeURIComponent(r.matchId)}?preset=hi`);
+                    }}
+                  >
+                    Say hi
+                  </button>
+                ) : null}
                 {r.unread > 0 ? (
                   r.unread === 1 ? (
                     <span style={dot} aria-label="Unread" />
