@@ -213,6 +213,11 @@ export function markMatchClicked(uid: string, matchId: string) {
   save(s);
 }
 
+export function isMatchClicked(uid: string, matchId: string): boolean {
+  const s = load();
+  return Boolean(s.clickedMatchesByUser?.[uid]?.[matchId]);
+}
+
 export function unreadCountForMatch(uid: string, matchId: string): number {
   const u = String(uid || '').trim();
   const mid = String(matchId || '').trim();
