@@ -25,10 +25,6 @@ function ensureHttps(url: string) {
   const u = clampStr(url).trim();
   if (!u) return '';
   if (isDataUri(u)) return u;
-
-  // Allow root-relative URLs (Next serves /public at root).
-  if (u.startsWith('/')) return u;
-
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
   // allow protocol-relative or bare domains
   if (u.startsWith('//')) return 'https:' + u;
@@ -94,9 +90,10 @@ export default function ProfilePage() {
     return (v || 'any').toLowerCase();
   }, [extras, snap]);
 
-  const initialZip = useMemo(() => {
-    const v = (extras as any)?.zipCode ?? (extras as any)?.zip ?? (snap as any)?.zipCode ?? (snap as any)?.zip ?? '';
-    return String(v ?? '').toString();
+  const initialZipCode = useMemo(() => {
+    const ex: any = extras as any;
+    const sn: any = snap as any;
+    return String(ex?.zipCode ?? ex?.zip ?? sn?.zipCode ?? sn?.zip ?? '').toString();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -107,7 +104,7 @@ export default function ProfilePage() {
 
   const [age, setAge] = useState<number>(initialAge);
   const [sex, setSex] = useState<string>(initialSex);
-  const [zipCode, setZipCode] = useState<string>(initialZip);
+  const [zipCode, setZipCode] = useState<string>(initialZipCode);
 
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
@@ -193,7 +190,9 @@ export default function ProfilePage() {
 
   function save() {
     try {
-      // Snapshot: keep it minimal (types)
+      const cleanZip = zipCode.trim();
+
+      // Snapshot (core fields)
       upsertUserProfileSnapshot(uid, {
         id: uid,
         displayName: displayName.trim() || uid,
@@ -201,22 +200,31 @@ export default function ProfilePage() {
         email: '',
         photoUrl: primaryPhotoUrl || '',
         updatedAt: Date.now(),
+        sex: sex || 'any',
+        age: Number(age) || 0,
+        zipCode: cleanZip,
+        location: initialLocation || null,
       } as any);
 
-      // Extras: richer profile + gallery
+      // Extras (editable profile fields + gallery)
       setProfileExtras(uid, ({
-        displayName: displayName.trim(),
+        displayName: (displayName.trim() || uid),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
-        sex: (sex as any),
-        age: age || 0,
-        zipCode: zipCode.trim(),
+        sex: sex || 'any',
+        age: Number(age) || 0,
+        zipCode: cleanZip,
+        location: initialLocation || null,
+
+        // photo keys (keep compatibility across older UI)
         primaryPhotoUrl: primaryPhotoUrl || '',
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
+        gallery: gallery,
       } as any));
-toast('Saved!');
+
+      toast('Saved!');
     } catch (e: any) {
       toast('Save failed');
       console.error(e);
@@ -509,7 +517,7 @@ toast('Saved!');
             </div>
             <div>
               <div style={label}>ZIP code</div>
-              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} inputMode="numeric" />
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
             </div>
           </div>
 
