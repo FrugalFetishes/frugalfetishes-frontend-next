@@ -93,7 +93,7 @@ export default function ProfilePage() {
   const initialZipCode = useMemo(() => {
     const ex: any = extras as any;
     const sn: any = snap as any;
-    return String(ex?.zipCode ?? ex?.zip ?? ex?.postalCode ?? ex?.city ?? sn?.zipCode ?? sn?.zip ?? sn?.postalCode ?? sn?.city ?? '').toString();
+    return String(ex?.zipCode ?? ex?.zip ?? sn?.zipCode ?? sn?.zip ?? '').toString();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -191,26 +191,42 @@ export default function ProfilePage() {
   function save() {
     try {
       const cleanZip = zipCode.trim();
-      // Snapshot: keep it minimal (types)
+
+      // Snapshot (core fields)
       upsertUserProfileSnapshot(uid, {
         id: uid,
-        displayName: displayName.trim() || uid,
+        displayName: displayName.trim(),
         fullName: fullName.trim(),
         email: '',
         photoUrl: primaryPhotoUrl || '',
         updatedAt: Date.now(),
+        sex: sex || 'any',
+        age: Number(age) || 0,
+        zipCode: cleanZip,
+        city: cleanZip, // legacy mirror for older proximity logic
+        location: initialLocation || null,
       } as any);
 
-      // Extras: richer profile + gallery
+      // Extras (editable profile fields + gallery)
       setProfileExtras(uid, ({
         displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
+        sex: sex || 'any',
+        age: Number(age) || 0,
+        zipCode: cleanZip,
+        city: cleanZip, // legacy mirror for older proximity logic
+        location: initialLocation || null,
+
+        // photo keys (keep compatibility across older UI)
+        primaryPhotoUrl: primaryPhotoUrl || '',
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
+        gallery: gallery,
       } as any));
-toast('Saved!');
+
+      toast('Saved!');
     } catch (e: any) {
       toast('Save failed');
       console.error(e);
@@ -503,7 +519,7 @@ toast('Saved!');
             </div>
             <div>
               <div style={label}>ZIP code</div>
-              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} inputMode="numeric" />
             </div>
           </div>
 
