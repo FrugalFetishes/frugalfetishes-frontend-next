@@ -98,11 +98,26 @@ function initialState(): StoreState {
 
 function load(): StoreState {
   if (typeof window === 'undefined') return initialState();
-  const parsed = safeParse<StoreState>(window.localStorage.getItem(STORAGE_KEY));
+
+  // Try current key first, then a few legacy keys (from older deployments).
+  const keysToTry = [STORAGE_KEY, 'ff_social_v2', 'ff_social_v0', 'ff_social'];
+  let parsed: StoreState | null = null;
+
+  for (const k of keysToTry) {
+    const cand = safeParse<StoreState>(window.localStorage.getItem(k));
+    if (cand && (cand as any).version) {
+      parsed = cand as any;
+      // If we found legacy data under a different key, persist it to the current key.
+      if (k !== STORAGE_KEY) {
+        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cand)); } catch {}
+      }
+      break;
+    }
+  }
+
   if (!parsed || parsed.version !== 1) return initialState();
 
-  // Harden missing fields
-  return {
+  const hardened: StoreState = {
     ...initialState(),
     ...parsed,
     profilesByUid: parsed.profilesByUid ?? {},
@@ -113,7 +128,36 @@ function load(): StoreState {
     unreadByUser: parsed.unreadByUser ?? {},
     chatsByMatch: parsed.chatsByMatch ?? {},
   };
+
+  // Normalize snapshots so UI never ends up with a blank displayName.
+  for (const [uid, snapAny] of Object.entries(hardened.profilesByUid || {})) {
+    const snap: any = snapAny || {};
+    const extras: any = (hardened.extrasByUid || {})[uid] || {};
+    const inferred =
+      String(
+        snap.displayName ||
+          extras.displayName ||
+          extras.fullName ||
+          snap.fullName ||
+          snap.email ||
+          uid
+      ).trim() || uid;
+
+    if (!snap.id) snap.id = uid;
+    if (!snap.uid) snap.uid = uid;
+    if (!snap.displayName) snap.displayName = inferred;
+    if (!snap.updatedAt) snap.updatedAt = Date.now();
+    hardened.profilesByUid[uid] = snap as any;
+
+    // Keep extras mirror in sync if missing.
+    if (!extras.displayName) {
+      hardened.extrasByUid[uid] = { ...extras, displayName: inferred } as any;
+    }
+  }
+
+  return hardened;
 }
+
 
 function save(s: StoreState) {
   if (typeof window === 'undefined') return;
@@ -152,156 +196,48 @@ function normalizeGeo(v: any): Geo | null {
  */
 export function uidFromToken(token: string | null | undefined): string | null {
   const t = (token ?? '').toString().trim();
-  if (!t) return null;
-
-  const PIN_KEY = 'ff_uid_pinned_v1';
-
-  const getPinned = (): string | null => {
-    try {
-      if (typeof window === 'undefined') return null;
-      const v = window.localStorage.getItem(PIN_KEY);
-      return v ? String(v).trim() : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const setPinned = (uid: string) => {
-    try {
-      if (typeof window === 'undefined') return;
-      if (!uid) return;
-      window.localStorage.setItem(PIN_KEY, uid);
-    } catch {
-      // ignore
-    }
-  };
-
-  const decodeJwtUid = (jwt: string): string | null => {
-    try {
-      const parts = String(jwt).split('.');
-      if (parts.length < 2) return null;
-
-      // base64url -> base64
-      let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
-      const pad = b64.length % 4;
-      if (pad) b64 += '='.repeat(4 - pad);
-
-      let jsonStr = '';
-      if (typeof atob === 'function') {
-        const bin = atob(b64);
-        const esc = Array.prototype.map
-          .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('');
-        jsonStr = decodeURIComponent(esc);
-      } else {
-        // Node/build fallback
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const BufferCtor = require('buffer').Buffer;
-        jsonStr = BufferCtor.from(b64, 'base64').toString('utf8');
-      }
-
-      const payload: any = JSON.parse(jsonStr);
-      const cand =
-        payload?.uid ??
-        payload?.user_id ??
-        payload?.userId ??
-        payload?.sub ??
-        payload?.email ??
-        null;
-
-      const u = cand ? String(cand).trim() : '';
-      return u || null;
-    } catch {
-      return null;
-    }
-  };
-
-  const migrateIfNeeded = (fromUid: string, toUid: string) => {
-    try {
-      if (typeof window === 'undefined') return;
-      if (!fromUid || !toUid || fromUid === toUid) return;
-
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      const parsed = safeParse<StoreState>(raw);
-      if (!parsed || parsed.version !== 1) return;
-
-      const s: StoreState = { ...initialState(), ...parsed } as any;
-
-      const moveKey = <T>(obj: Dict<T>) => {
-        if (!obj) return;
-        const anyObj: any = obj as any;
-        if (!anyObj[toUid] && anyObj[fromUid]) anyObj[toUid] = anyObj[fromUid];
-      };
-
-      moveKey(s.profilesByUid);
-      moveKey(s.extrasByUid);
-      moveKey(s.likesByUser);
-      moveKey(s.matchesByUser);
-      moveKey(s.clickedMatchesByUser);
-      moveKey(s.unreadByUser);
-
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-    } catch {
-      // ignore
-    }
-  };
-
-  // If token looks like a JWT, derive a stable uid from payload.
-  if (t.includes('.')) {
-    const derived = decodeJwtUid(t);
-    if (derived) {
-      const pinned = getPinned();
-      // If we previously used the raw token as uid, migrate that data to derived uid.
-      if (pinned && pinned !== derived) migrateIfNeeded(pinned, derived);
-      // Also migrate from raw token -> derived (legacy behavior of earlier builds).
-      migrateIfNeeded(t, derived);
-      setPinned(derived);
-      return derived;
-    }
-  }
-
-  // Non-JWT tokens (or decode failed). Pin the first known uid so it stays stable across sessions.
-  const pinned = getPinned();
-  if (pinned) return pinned;
-
-  // If we have prior store data, pick the most recently updated profile uid as the "real" uid.
-  try {
-    if (typeof window !== 'undefined') {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      const parsed = safeParse<StoreState>(raw);
-      if (parsed && parsed.version === 1 && parsed.profilesByUid) {
-        let bestUid = '';
-        let bestAt = 0;
-        for (const [k, v] of Object.entries(parsed.profilesByUid)) {
-          const at = clamp((v as any)?.updatedAt);
-          if (at > bestAt) {
-            bestAt = at;
-            bestUid = k;
-          }
-        }
-        if (bestUid) {
-          setPinned(bestUid);
-          // Migrate anything saved under the current raw token into the pinned uid.
-          migrateIfNeeded(t, bestUid);
-          return bestUid;
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  // Last resort: use the token itself but pin it so it stays consistent on this device.
-  setPinned(t);
-  return t;
+  return t ? t : null;
 }
 
 // ---- Profile snapshot helpers ----
 
 export function loadUserProfileSnapshot(uid: string): ProfileSnapshot | null {
   const s = load();
-  return s.profilesByUid[uid] ?? null;
+  const snapAny: any = (s.profilesByUid && (s.profilesByUid as any)[uid]) || null;
+  if (!snapAny) return null;
+
+  const extrasAny: any = (s.extrasByUid && (s.extrasByUid as any)[uid]) || {};
+  const inferred =
+    String(
+      snapAny.displayName ||
+        extrasAny.displayName ||
+        extrasAny.fullName ||
+        snapAny.fullName ||
+        snapAny.email ||
+        uid
+    ).trim() || uid;
+
+  // Ensure stable identifiers + non-empty displayName.
+  let changed = false;
+  if (!snapAny.id) { snapAny.id = uid; changed = true; }
+  if (!snapAny.uid) { snapAny.uid = uid; changed = true; }
+  if (!snapAny.displayName) { snapAny.displayName = inferred; changed = true; }
+
+  // Mirror a few optional fields from extras so consumers can read either.
+  for (const k of ['sex', 'age', 'zipCode', 'location'] as const) {
+    if (snapAny[k] === undefined && extrasAny?.[k] !== undefined) {
+      snapAny[k] = extrasAny[k];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    try { (s.profilesByUid as any)[uid] = snapAny; save(s); } catch {}
+  }
+
+  return snapAny as ProfileSnapshot;
 }
+
 
 export function upsertUserProfileSnapshot(uid: string, patch: Partial<ProfileSnapshot>): ProfileSnapshot {
   const s = load();
@@ -328,8 +264,32 @@ export function upsertUserProfileSnapshot(uid: string, patch: Partial<ProfileSna
 
 export function getProfileExtras(uid: string): ProfileExtras {
   const s = load();
-  return s.extrasByUid[uid] ?? {};
+  const extrasAny: any = (s.extrasByUid && (s.extrasByUid as any)[uid]) || {};
+  const snapAny: any = (s.profilesByUid && (s.profilesByUid as any)[uid]) || {};
+
+  // If extras are missing fields but snapshot has them (or vice versa), merge gently.
+  const merged: any = { ...snapAny, ...extrasAny };
+
+  // Ensure displayName is never blank for UI/header.
+  const inferred =
+    String(
+      merged.displayName ||
+        merged.fullName ||
+        merged.email ||
+        snapAny.displayName ||
+        uid
+    ).trim() || uid;
+
+  if (!merged.displayName) merged.displayName = inferred;
+
+  // Normalize common photo key variants used across older profile pages.
+  if (!merged.primaryPhotoUrl && merged.avatarUrl) merged.primaryPhotoUrl = merged.avatarUrl;
+  if (!merged.primaryPhotoUrl && merged.photoUrl) merged.primaryPhotoUrl = merged.photoUrl;
+  if (!merged.primaryPhotoUrl && merged.photoURL) merged.primaryPhotoUrl = merged.photoURL;
+
+  return merged as ProfileExtras;
 }
+
 
 export function setProfileExtras(uid: string, patch: Partial<ProfileExtras>): ProfileExtras {
   const s = load();
@@ -338,6 +298,16 @@ export function setProfileExtras(uid: string, patch: Partial<ProfileExtras>): Pr
     ...prev,
     ...patch,
   };
+
+  // Don't accidentally wipe existing values with empty strings.
+  // (This happened during earlier zip/city experiments.)
+  const prevAny: any = prev as any;
+  const nextAny: any = next as any;
+  for (const k of ['displayName', 'fullName', 'headline', 'bio', 'zipCode'] as const) {
+    const incoming = (patch as any)?.[k];
+    if (incoming === '' && prevAny?.[k]) nextAny[k] = prevAny[k];
+  }
+
 
   // keep core fields consistent if provided
   if (patch.sex !== undefined) next.sex = normalizeSex(patch.sex);
