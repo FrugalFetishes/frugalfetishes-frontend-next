@@ -94,6 +94,10 @@ export default function ProfilePage() {
     return String((extras as any)?.city ?? (snap as any)?.city ?? '').toString();
   }, [extras, snap]);
 
+  const initialZipCode = useMemo(() => {
+    return String((extras as any)?.zipCode ?? (snap as any)?.zipCode ?? '').toString();
+  }, [extras, snap]);
+
   const initialLocation = useMemo(() => {
     const loc = (extras as any)?.location ?? (snap as any)?.location;
     if (loc && typeof loc === 'object' && typeof (loc as any).lat === 'number' && typeof (loc as any).lng === 'number') return loc as { lat: number; lng: number };
@@ -103,6 +107,7 @@ export default function ProfilePage() {
   const [age, setAge] = useState<number>(initialAge);
   const [sex, setSex] = useState<string>(initialSex);
   const [city, setCity] = useState<string>(initialCity);
+  const [zipCode, setZipCode] = useState<string>(initialZipCode);
 
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
@@ -206,6 +211,7 @@ export default function ProfilePage() {
         bio: about.trim(),
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
+        zipCode: zipCode.trim(),
       } as any));
 toast('Saved!');
     } catch (e: any) {
@@ -501,6 +507,17 @@ toast('Saved!');
             <div>
               <div style={label}>City</div>
               <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Miami" style={input} />
+            </div>
+
+            <div>
+              <div style={label}>ZIP code</div>
+              <input
+                value={zipCode}
+                onChange={(e) => setZipCode(e.target.value)}
+                placeholder="e.g. 33101"
+                style={input}
+                inputMode="numeric"
+              />
             </div>
           </div>
 
