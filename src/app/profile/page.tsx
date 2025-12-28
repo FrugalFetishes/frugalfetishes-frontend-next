@@ -35,8 +35,6 @@ function normalizePhotoUrl(url: string) {
   return ensureHttps(url).trim();
 }
 
-const PROFILE_PAGE_VERSION = 'PROFILE_ZIP_AGE_SEX_V1';
-
 export default function ProfilePage() {
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
@@ -202,23 +200,21 @@ export default function ProfilePage() {
         email: '',
         photoUrl: primaryPhotoUrl || '',
         updatedAt: Date.now(),
-        sex: (sex && sex !== 'any') ? sex : undefined,
-        age: (Number(age) > 0 ? Number(age) : undefined),
+        sex: sex || 'any',
+        age: Number(age) || 0,
         zipCode: cleanZip,
-        city: cleanZip,
         location: initialLocation || null,
       } as any);
 
       // Extras (editable profile fields + gallery)
       setProfileExtras(uid, ({
-        displayName: displayName.trim(),
+        displayName: (displayName.trim() || uid),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
-        sex: (sex && sex !== 'any') ? sex : undefined,
-        age: (Number(age) > 0 ? Number(age) : undefined),
+        sex: sex || 'any',
+        age: Number(age) || 0,
         zipCode: cleanZip,
-        city: cleanZip,
         location: initialLocation || null,
 
         // photo keys (keep compatibility across older UI)
@@ -389,7 +385,7 @@ export default function ProfilePage() {
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile <span style={opacity:0.6,fontSize:12}>(PROFILE_PATCH_V3_ZIP_AGE_SEX)</span></div>
               <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
             </div>
             <button type="button" style={btn} onClick={save}>
@@ -521,7 +517,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <div style={label}>ZIP code</div>
-              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} inputMode="numeric" />
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
             </div>
           </div>
 
