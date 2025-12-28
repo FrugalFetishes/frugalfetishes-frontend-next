@@ -152,7 +152,40 @@ function normalizeGeo(v: any): Geo | null {
  */
 export function uidFromToken(token: string | null | undefined): string | null {
   const t = (token ?? '').toString().trim();
-  return t ? t : null;
+  if (!t) return null;
+
+  // If this is already a simple uid (not a JWT), keep it.
+  if (!t.includes('.')) return t;
+
+  // JWT payload is base64url JSON. Extract a stable uid key.
+  try {
+    const parts = t.split('.');
+    if (parts.length < 2) return t;
+
+    let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4;
+    if (pad) b64 += '='.repeat(4 - pad);
+
+    const bin = atob(b64);
+    const esc = Array.prototype.map
+      .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+      .join('');
+    const jsonStr = decodeURIComponent(esc);
+    const payload: any = JSON.parse(jsonStr);
+
+    const cand =
+      payload?.uid ??
+      payload?.user_id ??
+      payload?.userId ??
+      payload?.sub ??
+      payload?.email ??
+      null;
+
+    const u = cand ? String(cand).trim() : '';
+    return u || t;
+  } catch {
+    return t;
+  }
 }
 
 // ---- Profile snapshot helpers ----
