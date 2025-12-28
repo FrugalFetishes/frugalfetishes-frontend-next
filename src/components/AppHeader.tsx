@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { clearSession, requireSession } from '@/lib/session';
-import { badgeCounts, uidFromToken, loadUserProfileSnapshot } from '@/lib/socialStore';
+import { badgeCounts, uidFromToken, loadUserProfileSnapshot, getProfileExtras } from '@/lib/socialStore';
 
 export type ActiveTab =
   | 'discover'
@@ -100,8 +100,9 @@ export default function AppHeader(props: {
   const displayName = useMemo(() => {
     try {
       if (!uid || uid === 'anon') return '';
-      const snap = loadUserProfileSnapshot(uid);
-      const name = (snap?.displayName || (snap as any)?.email || '').toString().trim();
+      const extras = getProfileExtras(uid) as any;
+      const snap = loadUserProfileSnapshot(uid) as any;
+      const name = (extras?.displayName || snap?.displayName || extras?.email || snap?.email || '').toString().trim();
       return name;
     } catch {
       return '';
