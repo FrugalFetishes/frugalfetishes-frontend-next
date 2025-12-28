@@ -199,16 +199,15 @@ export default function ProfilePage() {
       } as any);
 
       // Extras: richer profile + gallery
-      setProfileExtras(uid, {
+      setProfileExtras(uid, ({
         displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
-      });
-
-      toast('Saved!');
+      } as any));
+toast('Saved!');
     } catch (e: any) {
       toast('Save failed');
       console.error(e);
