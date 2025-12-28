@@ -101,7 +101,7 @@ export default function AppHeader(props: {
     try {
       if (!uid || uid === 'anon') return '';
       const snap = loadUserProfileSnapshot(uid);
-      const name = (snap?.displayName || snap?.email || '').toString().trim();
+      const name = (snap?.displayName || (snap as any)?.email || '').toString().trim();
       return name;
     } catch {
       return '';
