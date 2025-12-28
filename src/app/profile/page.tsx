@@ -41,6 +41,7 @@ export default function ProfilePage() {
 
   const snap = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
   const extras = useMemo(() => getProfileExtras(uid), [uid]);
+  const extrasAny: any = extras as any;
 
   const initialGallery: string[] = useMemo(() => {
         const anyExtras: any = extras as any;
@@ -103,10 +104,10 @@ export default function ProfilePage() {
   const [sex, setSex] = useState<string>(initialSex);
   const [city, setCity] = useState<string>(initialCity);
 
-  const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extras?.displayName || ''));
-  const [fullName, setFullName] = useState<string>(clampStr(extras?.fullName || ''));
-  const [headline, setHeadline] = useState<string>(clampStr(extras?.headline || ''));
-  const [about, setAbout] = useState<string>(clampStr(extras?.about || ''));
+  const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
+  const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
+  const [headline, setHeadline] = useState<string>(clampStr(extrasAny?.headline || ''));
+  const [about, setAbout] = useState<string>(clampStr(extrasAny?.about || ''));
   const [primaryPhotoUrl, setPrimaryPhotoUrl] = useState<string>(clampStr(initialPrimary));
   const [gallery, setGallery] = useState<string[]>(initialGallery);
   const effectivePrimary = useMemo(() => normalizePhotoUrl(primaryPhotoUrl || ''), [primaryPhotoUrl]);
