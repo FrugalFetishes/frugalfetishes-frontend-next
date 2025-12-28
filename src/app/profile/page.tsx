@@ -90,12 +90,9 @@ export default function ProfilePage() {
     return (v || 'any').toLowerCase();
   }, [extras, snap]);
 
-  const initialCity = useMemo(() => {
-    return String((extras as any)?.city ?? (snap as any)?.city ?? '').toString();
-  }, [extras, snap]);
-
-  const initialZipCode = useMemo(() => {
-    return String((extras as any)?.zipCode ?? (snap as any)?.zipCode ?? '').toString();
+  const initialZip = useMemo(() => {
+    const v = (extras as any)?.zipCode ?? (extras as any)?.zip ?? (snap as any)?.zipCode ?? (snap as any)?.zip ?? '';
+    return String(v ?? '').toString();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -106,8 +103,7 @@ export default function ProfilePage() {
 
   const [age, setAge] = useState<number>(initialAge);
   const [sex, setSex] = useState<string>(initialSex);
-  const [city, setCity] = useState<string>(initialCity);
-  const [zipCode, setZipCode] = useState<string>(initialZipCode);
+  const [zipCode, setZipCode] = useState<string>(initialZip);
 
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
@@ -374,7 +370,7 @@ toast('Saved!');
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile (ZIP v1)</div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
               <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
             </div>
             <button type="button" style={btn} onClick={save}>
@@ -505,19 +501,8 @@ toast('Saved!');
               />
             </div>
             <div>
-              <div style={label}>City</div>
-              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Miami" style={input} />
-            </div>
-
-            <div>
               <div style={label}>ZIP code</div>
-              <input
-                value={zipCode}
-                onChange={(e) => setZipCode(e.target.value)}
-                placeholder="e.g. 33101"
-                style={input}
-                inputMode="numeric"
-              />
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} inputMode="numeric" />
             </div>
           </div>
 
