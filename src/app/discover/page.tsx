@@ -7,12 +7,14 @@ import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
 
 
-import { uidFromToken, likeUser } from '@/lib/socialStore';
+import { uidFromToken, likeUser, getProfileExtras } from '@/lib/socialStore';
 type Profile = {
   id: string;
   name: string;
   age?: number;
-  city?: string;
+  zipCode?: string;
+  sex?: 'male' | 'female';
+  location?: { lat: number; lng: number };
   bio?: string;
   photoUrl?: string;
   profilePhotoUrl?: string;
@@ -46,6 +48,21 @@ function safeString(v: any, fallback: string = ''): string {
   } catch {
     return fallback;
   }
+}
+
+function distanceMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (n: number) => (n * Math.PI) / 180;
+  const R = 3958.8; // Earth radius miles
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return R * c;
 }
 
 
@@ -134,6 +151,47 @@ export default function DiscoverPage() {
       return 'anon';
     }
   }, []);
+
+  const myExtras = useMemo(() => {
+    try {
+      return getProfileExtras(myUid);
+    } catch {
+      return null as any;
+    }
+  }, [myUid]);
+
+  const [deviceLoc, setDeviceLoc] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const cached = window.localStorage.getItem('ff_device_loc');
+      if (cached) {
+        const obj = JSON.parse(cached);
+        if (obj && typeof obj.lat === 'number' && typeof obj.lng === 'number') setDeviceLoc({ lat: obj.lat, lng: obj.lng });
+      }
+    } catch {}
+
+    // Attempt to get location (mobile-first); if denied it will silently fall back to ZIP.
+    try {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setDeviceLoc(next);
+          try {
+            window.localStorage.setItem('ff_device_loc', JSON.stringify(next));
+          } catch {}
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    } catch {}
+  }, []);
+
+  const myLoc = (deviceLoc || (myExtras as any)?.location || null) as { lat: number; lng: number } | null;
+  const myZip = useMemo(() => safeString((myExtras as any)?.zipCode || (myExtras as any)?.zip || ''), [myExtras]);
+
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<string>('');
@@ -171,36 +229,58 @@ export default function DiscoverPage() {
 
   const currentZip = useMemo(() => {
     try {
-      const anyCur: any = current as any;
-      return safeString(
-        anyCur?.zip ||
-          anyCur?.postalCode ||
-          anyCur?.zipcode ||
-          anyCur?.location?.zip ||
-          anyCur?.location?.postalCode ||
-          anyCur?.locationText ||
-          ''
-      );
+      const curr: any = current as any;
+      return safeString(curr?.zipCode || curr?.zip || curr?.postalCode || '');
     } catch {
       return '';
     }
   }, [current]);
 
-  const currentSex = useMemo(() => {
+  const currentLoc = useMemo(() => {
     try {
-      const anyCur: any = current as any;
-      const raw = safeString(anyCur?.sex || anyCur?.gender || anyCur?.genderIdentity || '').toLowerCase();
-      if (!raw) return '';
-      if (raw.startsWith('m')) return 'Male';
-      if (raw.startsWith('f')) return 'Female';
-      // tolerate 'man'/'woman' etc
-      if (raw.includes('male')) return 'Male';
-      if (raw.includes('female')) return 'Female';
-      return '';
+      const curId = (current as any)?.id;
+      if (!curId) return null;
+      const ex: any = getProfileExtras(curId);
+      const loc = ex?.location;
+      if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') return { lat: loc.lat, lng: loc.lng };
+      const curAny: any = current as any;
+      const loc2 = curAny?.location;
+      if (loc2 && typeof loc2.lat === 'number' && typeof loc2.lng === 'number') return { lat: loc2.lat, lng: loc2.lng };
+      return null;
     } catch {
-      return '';
+      return null;
     }
   }, [current]);
+
+  const distanceMi = useMemo(() => {
+    try {
+      if (myLoc && currentLoc) {
+        const d = distanceMiles(myLoc, currentLoc);
+        if (Number.isFinite(d)) return Math.round(d * 10) / 10;
+      }
+    } catch {}
+    return null as number | null;
+  }, [myLoc, currentLoc]);
+
+
+  const distanceMi = useMemo(() => {
+    try {
+      if (!myLoc || !currentLoc) return null;
+      const R = 3958.8; // miles
+      const toRad = (x: number) => (x * Math.PI) / 180;
+      const dLat = toRad(currentLoc.lat - myLoc.lat);
+      const dLng = toRad(currentLoc.lng - myLoc.lng);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(myLoc.lat)) * Math.cos(toRad(currentLoc.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const d = R * c;
+      if (!Number.isFinite(d)) return null;
+      return Math.round(d * 10) / 10;
+    } catch {
+      return null;
+    }
+  }, [myLoc, currentLoc]);
 
   const currentAbout = useMemo(() => {
     try {
@@ -264,7 +344,7 @@ export default function DiscoverPage() {
           id: String(p.id || p.userId || p.uid || ''),
           name: String(p.name || p.displayName || 'Unknown'),
           age: typeof p.age === 'number' ? p.age : Number(p.age) || undefined,
-          city: p.city ? String(p.city) : undefined,
+          zipCode: (p as any).zipCode ? String((p as any).zipCode) : (p as any).zip ? String((p as any).zip) : undefined,
           bio: p.bio ? String(p.bio) : p.about ? String(p.about) : undefined,
           photoUrl: p.photoUrl,
           profilePhotoUrl: p.profilePhotoUrl,
@@ -345,7 +425,7 @@ export default function DiscoverPage() {
         userId: p.id,
         name: p.name,
         age: p.age,
-        city: p.city,
+        zipCode: (p as any).zipCode || (p as any).zip || undefined,
         photoUrl: pickPhotoUrl(p),
         matchedAt: Date.now(),
       });
@@ -650,7 +730,7 @@ export default function DiscoverPage() {
                   {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
                 </div>
                 <div style={badge}>
-                  <span style={{ opacity: 0.9 }}>{currentZip || '—'}</span>
+                  <span style={{ opacity: 0.9 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
                   {currentAbout ? currentAbout : 'Swipe left/right, or swipe up to view profile.'}
@@ -726,12 +806,7 @@ export default function DiscoverPage() {
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
-                <div style={{ opacity: 0.92 }}>{currentZip || '—'}</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Sex</div>
-                <div style={{ opacity: 0.92 }}>{currentSex || '—'}</div>
+                <div style={{ opacity: 0.92 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</div>
               </div>
             </div>
 
