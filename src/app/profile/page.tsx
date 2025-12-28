@@ -99,8 +99,8 @@ function deriveUidFromSessionToken(token: string): string {
 
 
 export default function ProfilePage() {
-  const token = useMemo(() => requireSession(), []);
-    const uid = useMemo(() => deriveUidFromSessionToken(token), [token]);
+    const token = useMemo(() => requireSession(), []);
+  const uid = useMemo(() => deriveUidFromSessionToken(clampStr(token)), [token]);
 
   const snap = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
   const extras = useMemo(() => getProfileExtras(uid), [uid]);
