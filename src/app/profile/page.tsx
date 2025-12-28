@@ -204,8 +204,8 @@ export default function ProfilePage() {
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
-        primaryPhotoUrl: primaryPhotoUrl || '',
-        gallery: gallery,
+        avatarUrl: primaryPhotoUrl || '',
+        galleryUrls: gallery,
       });
 
       toast('Saved!');
