@@ -157,35 +157,79 @@ export function uidFromToken(token: string | null | undefined): string | null {
   // If this is already a simple uid (not a JWT), keep it.
   if (!t.includes('.')) return t;
 
-  // JWT payload is base64url JSON. Extract a stable uid key.
-  try {
-    const parts = t.split('.');
-    if (parts.length < 2) return t;
+  const derived = (() => {
+    try {
+      const parts = t.split('.');
+      if (parts.length < 2) return null;
 
-    let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
-    const pad = b64.length % 4;
-    if (pad) b64 += '='.repeat(4 - pad);
+      // base64url -> base64
+      let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
+      const pad = b64.length % 4;
+      if (pad) b64 += '='.repeat(4 - pad);
 
-    const bin = atob(b64);
-    const esc = Array.prototype.map
-      .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-      .join('');
-    const jsonStr = decodeURIComponent(esc);
-    const payload: any = JSON.parse(jsonStr);
+      // Decode in browser (atob) or on server (Buffer).
+      let jsonStr = '';
+      if (typeof atob === 'function') {
+        const bin = atob(b64);
+        const esc = Array.prototype.map
+          .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('');
+        jsonStr = decodeURIComponent(esc);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const buf = (globalThis as any)?.Buffer ? (globalThis as any).Buffer : require('buffer').Buffer;
+        jsonStr = buf.from(b64, 'base64').toString('utf8');
+      }
 
-    const cand =
-      payload?.uid ??
-      payload?.user_id ??
-      payload?.userId ??
-      payload?.sub ??
-      payload?.email ??
-      null;
+      const payload: any = JSON.parse(jsonStr);
+      const cand =
+        payload?.uid ??
+        payload?.user_id ??
+        payload?.userId ??
+        payload?.sub ??
+        payload?.email ??
+        null;
 
-    const u = cand ? String(cand).trim() : '';
-    return u || t;
-  } catch {
-    return t;
+      const u = cand ? String(cand).trim() : '';
+      return u || null;
+    } catch {
+      return null;
+    }
+  })();
+
+  // If we can derive a stable uid, migrate any previously-saved local store
+  // that may have been keyed by the raw token string.
+  if (derived && derived !== t) {
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        const parsed = safeParse<StoreState>(raw);
+        if (parsed && parsed.version === 1) {
+          const s: StoreState = { ...initialState(), ...parsed } as any;
+
+          const moveUserKey = <T extends Record<string, any>>(obj: T | undefined) => {
+            const o: any = obj || {};
+            if (!o[derived] && o[t]) o[derived] = o[t];
+          };
+
+          moveUserKey(s.profilesByUid as any);
+          moveUserKey(s.extrasByUid as any);
+          moveUserKey(s.likesByUser as any);
+          moveUserKey(s.matchesByUser as any);
+          moveUserKey(s.clickedMatchesByUser as any);
+          moveUserKey(s.unreadByUser as any);
+
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+        }
+      }
+    } catch {
+      // ignore migration errors
+    }
+    return derived;
   }
+
+  // Fallback: return the raw token (legacy behavior)
+  return derived || t;
 }
 
 // ---- Profile snapshot helpers ----
