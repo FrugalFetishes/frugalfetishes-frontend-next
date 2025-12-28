@@ -43,7 +43,8 @@ export default function ProfilePage() {
   const extras = useMemo(() => getProfileExtras(uid), [uid]);
 
   const initialGallery: string[] = useMemo(() => {
-    const g = (extras && (extras.gallery || extras.galleryUrls)) as any;
+        const anyExtras: any = extras as any;
+    const g = (anyExtras && (anyExtras.gallery || anyExtras.galleryUrls)) as any;
     const fromExtras = Array.isArray(g) ? g.filter(Boolean).map((x) => clampStr(x)).filter(Boolean) : [];
 
     // Also honor legacy/alternate single-photo fields so the current profile picture
@@ -84,30 +85,11 @@ export default function ProfilePage() {
 
   const initialSex = useMemo(() => {
     const v = String((extras as any)?.sex ?? (snap as any)?.sex ?? 'any');
-    
-  function useMyLocation() {
-    try {
-      if (typeof window === 'undefined') return;
-      if (!navigator.geolocation) {
-        setLocationNote('Location not supported on this device.');
-        return;
-      }
-      setLocationNote('Requesting location…');
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          setLocationNote('Location set from device.');
-        },
-        (err) => {
-          setLocationNote(err?.message || 'Unable to get location.');
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    } catch {
-      setLocationNote('Unable to get location.');
-    }
-  }
-return (v || 'any').toLowerCase();
+    return (v || 'any').toLowerCase();
+  }, [extras, snap]);
+
+  const initialCity = useMemo(() => {
+    return String((extras as any)?.city ?? (snap as any)?.city ?? '').toString();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -117,12 +99,8 @@ return (v || 'any').toLowerCase();
   }, [extras, snap]);
 
   const [age, setAge] = useState<number>(initialAge);
-  const [sex, setSex] = useState<'male' | 'female'>(initialSex);
-  const [zipCode, setZipCode] = useState<string>(initialZipCode);
-
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(initialLocation);
-  const [locationNote, setLocationNote] = useState<string>('');
-
+  const [sex, setSex] = useState<string>(initialSex);
+  const [city, setCity] = useState<string>(initialCity);
 
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extras?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extras?.fullName || ''));
@@ -223,16 +201,9 @@ return (v || 'any').toLowerCase();
         displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
-        bio: about.trim(),
-        about: about.trim(), // legacy alias
-        sex,
-        age: Number.isFinite(Number(age)) ? Number(age) : undefined,
-        zipCode: zipCode.trim(),
-        location: location || undefined,
+        about: about.trim(),
         primaryPhotoUrl: primaryPhotoUrl || '',
-        photos: gallery,
-        gallery: gallery, // legacy alias
-
+        gallery: gallery,
       });
 
       toast('Saved!');
@@ -502,34 +473,16 @@ return (v || 'any').toLowerCase();
             </div>
           </div>
 
-          <div style={row}>
-            <div>
-              <div style={label}>Location</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button type="button" style={btn} onClick={useMyLocation}>
-                  Use my location (mobile)
-                </button>
-                {location ? (
-                  <div style={hint}>
-                    Lat {location.lat.toFixed(4)}, Lng {location.lng.toFixed(4)}
-                  </div>
-                ) : (
-                  <div style={hint}>Not set</div>
-                )}
-              </div>
-              {locationNote ? <div style={hint}>{locationNote}</div> : null}
-              <div style={hint}>Discover will prefer device location; if not available it will fall back to ZIP code.</div>
-            </div>
-          </div>
-
 
           <div style={row}>
             <div>
               <div style={label}>Sex</div>
-              <select value={sex} onChange={(e) => setSex(e.target.value as any)} style={input as any}>
+              <select value={sex} onChange={(e) => setSex(e.target.value)} style={input as any}>
+                <option value="any">Any</option>
                 <option value="female">Female</option>
                 <option value="male">Male</option>
-                </select>
+                <option value="nonbinary">Non-binary</option>
+              </select>
             </div>
             <div>
               <div style={label}>Age</div>
@@ -545,8 +498,8 @@ return (v || 'any').toLowerCase();
               />
             </div>
             <div>
-              <div style={label}>ZIP Code</div>
-              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 60601" style={input} />
+              <div style={label}>City</div>
+              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Miami" style={input} />
             </div>
           </div>
 
