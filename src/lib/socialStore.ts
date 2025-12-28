@@ -154,122 +154,146 @@ export function uidFromToken(token: string | null | undefined): string | null {
   const t = (token ?? '').toString().trim();
   if (!t) return null;
 
-  // Simple local override map: token -> uid
-  const MAP_KEY = 'ff_uid_map_v1';
-  try {
-    if (typeof window !== 'undefined') {
-      const rawMap = window.localStorage.getItem(MAP_KEY);
-      if (rawMap) {
-        const m = safeParse<Record<string, string>>(rawMap) as any;
-        const mapped = m && typeof m[t] === 'string' ? String(m[t]).trim() : '';
-        if (mapped) return mapped;
-      }
+  const PIN_KEY = 'ff_uid_pinned_v1';
+
+  const getPinned = (): string | null => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const v = window.localStorage.getItem(PIN_KEY);
+      return v ? String(v).trim() : null;
+    } catch {
+      return null;
     }
-  } catch {}
+  };
 
-  // If this is already a simple uid (not a JWT), keep it (but still may be unstable).
-  const looksLikeJwt = t.includes('.');
-  let derived: string | null = null;
+  const setPinned = (uid: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      if (!uid) return;
+      window.localStorage.setItem(PIN_KEY, uid);
+    } catch {
+      // ignore
+    }
+  };
 
-  if (looksLikeJwt) {
-    derived = (() => {
-      try {
-        const parts = t.split('.');
-        if (parts.length < 2) return null;
+  const decodeJwtUid = (jwt: string): string | null => {
+    try {
+      const parts = String(jwt).split('.');
+      if (parts.length < 2) return null;
 
-        // base64url -> base64
-        let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
-        const pad = b64.length % 4;
-        if (pad) b64 += '='.repeat(4 - pad);
+      // base64url -> base64
+      let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
+      const pad = b64.length % 4;
+      if (pad) b64 += '='.repeat(4 - pad);
 
-        // Decode in browser (atob) or on server (Buffer)
-        let jsonStr = '';
-        if (typeof atob === 'function') {
-          const bin = atob(b64);
-          const esc = Array.prototype.map
-            .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-            .join('');
-          jsonStr = decodeURIComponent(esc);
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const buf = (globalThis as any)?.Buffer ? (globalThis as any).Buffer : require('buffer').Buffer;
-          jsonStr = buf.from(b64, 'base64').toString('utf8');
-        }
-
-        const payload: any = JSON.parse(jsonStr);
-        const cand =
-          payload?.uid ??
-          payload?.user_id ??
-          payload?.userId ??
-          payload?.sub ??
-          payload?.email ??
-          null;
-
-        const u = cand ? String(cand).trim() : '';
-        return u || null;
-      } catch {
-        return null;
+      let jsonStr = '';
+      if (typeof atob === 'function') {
+        const bin = atob(b64);
+        const esc = Array.prototype.map
+          .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('');
+        jsonStr = decodeURIComponent(esc);
+      } else {
+        // Node/build fallback
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const BufferCtor = require('buffer').Buffer;
+        jsonStr = BufferCtor.from(b64, 'base64').toString('utf8');
       }
-    })();
+
+      const payload: any = JSON.parse(jsonStr);
+      const cand =
+        payload?.uid ??
+        payload?.user_id ??
+        payload?.userId ??
+        payload?.sub ??
+        payload?.email ??
+        null;
+
+      const u = cand ? String(cand).trim() : '';
+      return u || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const migrateIfNeeded = (fromUid: string, toUid: string) => {
+    try {
+      if (typeof window === 'undefined') return;
+      if (!fromUid || !toUid || fromUid === toUid) return;
+
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const parsed = safeParse<StoreState>(raw);
+      if (!parsed || parsed.version !== 1) return;
+
+      const s: StoreState = { ...initialState(), ...parsed } as any;
+
+      const moveKey = <T>(obj: Dict<T>) => {
+        if (!obj) return;
+        const anyObj: any = obj as any;
+        if (!anyObj[toUid] && anyObj[fromUid]) anyObj[toUid] = anyObj[fromUid];
+      };
+
+      moveKey(s.profilesByUid);
+      moveKey(s.extrasByUid);
+      moveKey(s.likesByUser);
+      moveKey(s.matchesByUser);
+      moveKey(s.clickedMatchesByUser);
+      moveKey(s.unreadByUser);
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    } catch {
+      // ignore
+    }
+  };
+
+  // If token looks like a JWT, derive a stable uid from payload.
+  if (t.includes('.')) {
+    const derived = decodeJwtUid(t);
+    if (derived) {
+      const pinned = getPinned();
+      // If we previously used the raw token as uid, migrate that data to derived uid.
+      if (pinned && pinned !== derived) migrateIfNeeded(pinned, derived);
+      // Also migrate from raw token -> derived (legacy behavior of earlier builds).
+      migrateIfNeeded(t, derived);
+      setPinned(derived);
+      return derived;
+    }
   }
 
-  // Primary candidate uid:
-  const candidate = derived || t;
+  // Non-JWT tokens (or decode failed). Pin the first known uid so it stays stable across sessions.
+  const pinned = getPinned();
+  if (pinned) return pinned;
 
-  // If candidate doesn't match existing saved data, attempt to recover by choosing
-  // the most recently updated profile uid from local storage.
+  // If we have prior store data, pick the most recently updated profile uid as the "real" uid.
   try {
     if (typeof window !== 'undefined') {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       const parsed = safeParse<StoreState>(raw);
-      if (parsed && parsed.version === 1) {
-        const s: StoreState = { ...initialState(), ...parsed } as any;
-
-        const hasCandidate =
-          (s.profilesByUid && Object.prototype.hasOwnProperty.call(s.profilesByUid, candidate)) ||
-          (s.extrasByUid && Object.prototype.hasOwnProperty.call(s.extrasByUid, candidate)) ||
-          (s.matchesByUser && Object.prototype.hasOwnProperty.call(s.matchesByUser, candidate));
-
-        if (!hasCandidate) {
-          const keys = Object.keys(s.profilesByUid || {});
-          if (keys.length) {
-            let best = keys[0];
-            let bestAt = 0;
-            for (const k of keys) {
-              const snap: any = (s.profilesByUid as any)[k];
-              const ts = Number(snap?.updatedAt || snap?.createdAt || 0);
-              if (Number.isFinite(ts) && ts > bestAt) {
-                bestAt = ts;
-                best = k;
-              }
-            }
-            if (best && best !== candidate) {
-              // Save mapping so all pages converge on the same uid.
-              try {
-                const rawMap = window.localStorage.getItem(MAP_KEY);
-                const m = (rawMap ? safeParse<Record<string, string>>(rawMap) : null) || {};
-                (m as any)[t] = best;
-                window.localStorage.setItem(MAP_KEY, JSON.stringify(m));
-              } catch {}
-              return best;
-            }
+      if (parsed && parsed.version === 1 && parsed.profilesByUid) {
+        let bestUid = '';
+        let bestAt = 0;
+        for (const [k, v] of Object.entries(parsed.profilesByUid)) {
+          const at = clamp((v as any)?.updatedAt);
+          if (at > bestAt) {
+            bestAt = at;
+            bestUid = k;
           }
+        }
+        if (bestUid) {
+          setPinned(bestUid);
+          // Migrate anything saved under the current raw token into the pinned uid.
+          migrateIfNeeded(t, bestUid);
+          return bestUid;
         }
       }
     }
-  } catch {}
+  } catch {
+    // ignore
+  }
 
-  // Persist mapping for future stability (helps if token changes shape but keeps same derived)
-  try {
-    if (typeof window !== 'undefined') {
-      const rawMap = window.localStorage.getItem(MAP_KEY);
-      const m = (rawMap ? safeParse<Record<string, string>>(rawMap) : null) || {};
-      (m as any)[t] = candidate;
-      window.localStorage.setItem(MAP_KEY, JSON.stringify(m));
-    }
-  } catch {}
-
-  return candidate || null;
+  // Last resort: use the token itself but pin it so it stays consistent on this device.
+  setPinned(t);
+  return t;
 }
 
 // ---- Profile snapshot helpers ----
