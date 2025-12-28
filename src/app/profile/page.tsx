@@ -208,7 +208,7 @@ export default function ProfilePage() {
 
       // Extras (editable profile fields + gallery)
       setProfileExtras(uid, ({
-        displayName: (displayName.trim() || uid),
+        displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
@@ -385,7 +385,7 @@ export default function ProfilePage() {
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile <span style={{ opacity: 0.6, fontSize: 12 }}>(PROFILE_PATCH_V3_ZIP_AGE_SEX)</span></div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
               <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
             </div>
             <button type="button" style={btn} onClick={save}>
