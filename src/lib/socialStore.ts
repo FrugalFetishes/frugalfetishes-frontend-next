@@ -154,82 +154,122 @@ export function uidFromToken(token: string | null | undefined): string | null {
   const t = (token ?? '').toString().trim();
   if (!t) return null;
 
-  // If this is already a simple uid (not a JWT), keep it.
-  if (!t.includes('.')) return t;
-
-  const derived = (() => {
-    try {
-      const parts = t.split('.');
-      if (parts.length < 2) return null;
-
-      // base64url -> base64
-      let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
-      const pad = b64.length % 4;
-      if (pad) b64 += '='.repeat(4 - pad);
-
-      // Decode in browser (atob) or on server (Buffer).
-      let jsonStr = '';
-      if (typeof atob === 'function') {
-        const bin = atob(b64);
-        const esc = Array.prototype.map
-          .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('');
-        jsonStr = decodeURIComponent(esc);
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const buf = (globalThis as any)?.Buffer ? (globalThis as any).Buffer : require('buffer').Buffer;
-        jsonStr = buf.from(b64, 'base64').toString('utf8');
+  // Simple local override map: token -> uid
+  const MAP_KEY = 'ff_uid_map_v1';
+  try {
+    if (typeof window !== 'undefined') {
+      const rawMap = window.localStorage.getItem(MAP_KEY);
+      if (rawMap) {
+        const m = safeParse<Record<string, string>>(rawMap) as any;
+        const mapped = m && typeof m[t] === 'string' ? String(m[t]).trim() : '';
+        if (mapped) return mapped;
       }
-
-      const payload: any = JSON.parse(jsonStr);
-      const cand =
-        payload?.uid ??
-        payload?.user_id ??
-        payload?.userId ??
-        payload?.sub ??
-        payload?.email ??
-        null;
-
-      const u = cand ? String(cand).trim() : '';
-      return u || null;
-    } catch {
-      return null;
     }
-  })();
+  } catch {}
 
-  // If we can derive a stable uid, migrate any previously-saved local store
-  // that may have been keyed by the raw token string.
-  if (derived && derived !== t) {
-    try {
-      if (typeof window !== 'undefined') {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
-        const parsed = safeParse<StoreState>(raw);
-        if (parsed && parsed.version === 1) {
-          const s: StoreState = { ...initialState(), ...parsed } as any;
+  // If this is already a simple uid (not a JWT), keep it (but still may be unstable).
+  const looksLikeJwt = t.includes('.');
+  let derived: string | null = null;
 
-          const moveUserKey = <T extends Record<string, any>>(obj: T | undefined) => {
-            const o: any = obj || {};
-            if (!o[derived] && o[t]) o[derived] = o[t];
-          };
+  if (looksLikeJwt) {
+    derived = (() => {
+      try {
+        const parts = t.split('.');
+        if (parts.length < 2) return null;
 
-          moveUserKey(s.profilesByUid as any);
-          moveUserKey(s.extrasByUid as any);
-          moveUserKey(s.likesByUser as any);
-          moveUserKey(s.matchesByUser as any);
-          moveUserKey(s.clickedMatchesByUser as any);
-          moveUserKey(s.unreadByUser as any);
+        // base64url -> base64
+        let b64 = (parts[1] || '').replace(/-/g, '+').replace(/_/g, '/');
+        const pad = b64.length % 4;
+        if (pad) b64 += '='.repeat(4 - pad);
 
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+        // Decode in browser (atob) or on server (Buffer)
+        let jsonStr = '';
+        if (typeof atob === 'function') {
+          const bin = atob(b64);
+          const esc = Array.prototype.map
+            .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('');
+          jsonStr = decodeURIComponent(esc);
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const buf = (globalThis as any)?.Buffer ? (globalThis as any).Buffer : require('buffer').Buffer;
+          jsonStr = buf.from(b64, 'base64').toString('utf8');
         }
+
+        const payload: any = JSON.parse(jsonStr);
+        const cand =
+          payload?.uid ??
+          payload?.user_id ??
+          payload?.userId ??
+          payload?.sub ??
+          payload?.email ??
+          null;
+
+        const u = cand ? String(cand).trim() : '';
+        return u || null;
+      } catch {
+        return null;
       }
-    } catch {
-      // ignore migration errors
-    }
-    return derived;
+    })();
   }
 
-  // Fallback: return the raw token (legacy behavior)
-  return derived || t;
+  // Primary candidate uid:
+  const candidate = derived || t;
+
+  // If candidate doesn't match existing saved data, attempt to recover by choosing
+  // the most recently updated profile uid from local storage.
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const parsed = safeParse<StoreState>(raw);
+      if (parsed && parsed.version === 1) {
+        const s: StoreState = { ...initialState(), ...parsed } as any;
+
+        const hasCandidate =
+          (s.profilesByUid && Object.prototype.hasOwnProperty.call(s.profilesByUid, candidate)) ||
+          (s.extrasByUid && Object.prototype.hasOwnProperty.call(s.extrasByUid, candidate)) ||
+          (s.matchesByUser && Object.prototype.hasOwnProperty.call(s.matchesByUser, candidate));
+
+        if (!hasCandidate) {
+          const keys = Object.keys(s.profilesByUid || {});
+          if (keys.length) {
+            let best = keys[0];
+            let bestAt = 0;
+            for (const k of keys) {
+              const snap: any = (s.profilesByUid as any)[k];
+              const ts = Number(snap?.updatedAt || snap?.createdAt || 0);
+              if (Number.isFinite(ts) && ts > bestAt) {
+                bestAt = ts;
+                best = k;
+              }
+            }
+            if (best && best !== candidate) {
+              // Save mapping so all pages converge on the same uid.
+              try {
+                const rawMap = window.localStorage.getItem(MAP_KEY);
+                const m = (rawMap ? safeParse<Record<string, string>>(rawMap) : null) || {};
+                (m as any)[t] = best;
+                window.localStorage.setItem(MAP_KEY, JSON.stringify(m));
+              } catch {}
+              return best;
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // Persist mapping for future stability (helps if token changes shape but keeps same derived)
+  try {
+    if (typeof window !== 'undefined') {
+      const rawMap = window.localStorage.getItem(MAP_KEY);
+      const m = (rawMap ? safeParse<Record<string, string>>(rawMap) : null) || {};
+      (m as any)[t] = candidate;
+      window.localStorage.setItem(MAP_KEY, JSON.stringify(m));
+    }
+  } catch {}
+
+  return candidate || null;
 }
 
 // ---- Profile snapshot helpers ----
