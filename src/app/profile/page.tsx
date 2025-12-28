@@ -25,6 +25,10 @@ function ensureHttps(url: string) {
   const u = clampStr(url).trim();
   if (!u) return '';
   if (isDataUri(u)) return u;
+
+  // Allow root-relative URLs (Next serves /public at root).
+  if (u.startsWith('/')) return u;
+
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
   // allow protocol-relative or bare domains
   if (u.startsWith('//')) return 'https:' + u;
@@ -205,9 +209,12 @@ export default function ProfilePage() {
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
+        sex: (sex as any),
+        age: age || 0,
+        zipCode: zipCode.trim(),
+        primaryPhotoUrl: primaryPhotoUrl || '',
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
-        zipCode: zipCode.trim(),
       } as any));
 toast('Saved!');
     } catch (e: any) {
