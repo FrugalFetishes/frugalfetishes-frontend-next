@@ -84,11 +84,30 @@ export default function ProfilePage() {
 
   const initialSex = useMemo(() => {
     const v = String((extras as any)?.sex ?? (snap as any)?.sex ?? 'any');
-    return (v || 'any').toLowerCase();
-  }, [extras, snap]);
-
-  const initialCity = useMemo(() => {
-    return String((extras as any)?.city ?? (snap as any)?.city ?? '').toString();
+    
+  function useMyLocation() {
+    try {
+      if (typeof window === 'undefined') return;
+      if (!navigator.geolocation) {
+        setLocationNote('Location not supported on this device.');
+        return;
+      }
+      setLocationNote('Requesting location…');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          setLocationNote('Location set from device.');
+        },
+        (err) => {
+          setLocationNote(err?.message || 'Unable to get location.');
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch {
+      setLocationNote('Unable to get location.');
+    }
+  }
+return (v || 'any').toLowerCase();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -98,8 +117,12 @@ export default function ProfilePage() {
   }, [extras, snap]);
 
   const [age, setAge] = useState<number>(initialAge);
-  const [sex, setSex] = useState<string>(initialSex);
-  const [city, setCity] = useState<string>(initialCity);
+  const [sex, setSex] = useState<'male' | 'female'>(initialSex);
+  const [zipCode, setZipCode] = useState<string>(initialZipCode);
+
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(initialLocation);
+  const [locationNote, setLocationNote] = useState<string>('');
+
 
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extras?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extras?.fullName || ''));
@@ -200,9 +223,16 @@ export default function ProfilePage() {
         displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
-        about: about.trim(),
+        bio: about.trim(),
+        about: about.trim(), // legacy alias
+        sex,
+        age: Number.isFinite(Number(age)) ? Number(age) : undefined,
+        zipCode: zipCode.trim(),
+        location: location || undefined,
         primaryPhotoUrl: primaryPhotoUrl || '',
-        gallery: gallery,
+        photos: gallery,
+        gallery: gallery, // legacy alias
+
       });
 
       toast('Saved!');
@@ -472,16 +502,34 @@ export default function ProfilePage() {
             </div>
           </div>
 
+          <div style={row}>
+            <div>
+              <div style={label}>Location</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" style={btn} onClick={useMyLocation}>
+                  Use my location (mobile)
+                </button>
+                {location ? (
+                  <div style={hint}>
+                    Lat {location.lat.toFixed(4)}, Lng {location.lng.toFixed(4)}
+                  </div>
+                ) : (
+                  <div style={hint}>Not set</div>
+                )}
+              </div>
+              {locationNote ? <div style={hint}>{locationNote}</div> : null}
+              <div style={hint}>Discover will prefer device location; if not available it will fall back to ZIP code.</div>
+            </div>
+          </div>
+
 
           <div style={row}>
             <div>
               <div style={label}>Sex</div>
-              <select value={sex} onChange={(e) => setSex(e.target.value)} style={input as any}>
-                <option value="any">Any</option>
+              <select value={sex} onChange={(e) => setSex(e.target.value as any)} style={input as any}>
                 <option value="female">Female</option>
                 <option value="male">Male</option>
-                <option value="nonbinary">Non-binary</option>
-              </select>
+                </select>
             </div>
             <div>
               <div style={label}>Age</div>
@@ -497,8 +545,8 @@ export default function ProfilePage() {
               />
             </div>
             <div>
-              <div style={label}>City</div>
-              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Miami" style={input} />
+              <div style={label}>ZIP Code</div>
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 60601" style={input} />
             </div>
           </div>
 
