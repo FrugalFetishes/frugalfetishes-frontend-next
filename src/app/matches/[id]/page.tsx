@@ -34,7 +34,7 @@ export default function MatchProfilePage() {
   const matchId = String(params?.id || '').trim();
 
   const token = useMemo(() => requireSession(), []);
-  const myUid = useMemo(() => uidFromToken(token), [token]);
+  const myUid = useMemo(() => uidFromToken(token) ?? 'anon', [token]);
 
   const match: Match | null = useMemo(() => {
     try {
