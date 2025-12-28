@@ -25,6 +25,10 @@ function ensureHttps(url: string) {
   const u = clampStr(url).trim();
   if (!u) return '';
   if (isDataUri(u)) return u;
+
+  // Allow root-relative URLs (Next serves /public at root).
+  if (u.startsWith('/')) return u;
+
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
   // allow protocol-relative or bare domains
   if (u.startsWith('//')) return 'https:' + u;
@@ -35,72 +39,9 @@ function normalizePhotoUrl(url: string) {
   return ensureHttps(url).trim();
 }
 
-function base64UrlToUtf8(b64url: string): string {
-  // Convert base64url -> base64
-  let b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = b64.length % 4;
-  if (pad) b64 += '='.repeat(4 - pad);
-  try {
-    // atob gives binary string; decodeURIComponent trick for utf8
-    const bin = atob(b64);
-    const esc = Array.prototype.map
-      .call(bin, (c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-      .join('');
-    return decodeURIComponent(esc);
-  } catch {
-    return '';
-  }
-}
-
-function uidFromJwt(token: string): string | null {
-  try {
-    const parts = String(token || '').split('.');
-    if (parts.length < 2) return null;
-    const payloadRaw = base64UrlToUtf8(parts[1] || '');
-    if (!payloadRaw) return null;
-    const payload = JSON.parse(payloadRaw);
-    const cand =
-      payload?.uid ||
-      payload?.user_id ||
-      payload?.userId ||
-      payload?.sub ||
-      payload?.email ||
-      null;
-    return cand ? String(cand) : null;
-  } catch {
-    return null;
-  }
-}
-
-function deriveUidFromSessionToken(token: string): string {
-  const t = clampStr(token).trim();
-  if (!t) return 'anon';
-
-  // First try repo helper (may already decode JWT).
-  let u = '';
-  try {
-    u = String(uidFromToken(t) || '').trim();
-  } catch {
-    u = '';
-  }
-
-  // If we got a sane short uid, use it.
-  if (u && u.length <= 80 && !u.includes('.')) return u;
-
-  // If token looks like JWT, decode ourselves.
-  if (t.includes('.')) {
-    const jwtUid = uidFromJwt(t);
-    if (jwtUid) return jwtUid;
-  }
-
-  // Otherwise fall back to whatever uidFromToken gave (even if long), else anon.
-  return u || 'anon';
-}
-
-
 export default function ProfilePage() {
-    const token = useMemo(() => requireSession(), []);
-  const uid = useMemo(() => deriveUidFromSessionToken(clampStr(token)), [token]);
+  const token = useMemo(() => requireSession(), []);
+  const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
 
   const snap = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
   const extras = useMemo(() => getProfileExtras(uid), [uid]);
@@ -153,8 +94,9 @@ export default function ProfilePage() {
     return (v || 'any').toLowerCase();
   }, [extras, snap]);
 
-  const initialCity = useMemo(() => {
-    return String((extras as any)?.city ?? (snap as any)?.city ?? '').toString();
+  const initialZip = useMemo(() => {
+    const v = (extras as any)?.zipCode ?? (extras as any)?.zip ?? (snap as any)?.zipCode ?? (snap as any)?.zip ?? '';
+    return String(v ?? '').toString();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -165,7 +107,7 @@ export default function ProfilePage() {
 
   const [age, setAge] = useState<number>(initialAge);
   const [sex, setSex] = useState<string>(initialSex);
-  const [city, setCity] = useState<string>(initialCity);
+  const [zipCode, setZipCode] = useState<string>(initialZip);
 
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
@@ -267,6 +209,10 @@ export default function ProfilePage() {
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
+        sex: (sex as any),
+        age: age || 0,
+        zipCode: zipCode.trim(),
+        primaryPhotoUrl: primaryPhotoUrl || '',
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
       } as any));
@@ -562,8 +508,8 @@ toast('Saved!');
               />
             </div>
             <div>
-              <div style={label}>City</div>
-              <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Miami" style={input} />
+              <div style={label}>ZIP code</div>
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} inputMode="numeric" />
             </div>
           </div>
 
