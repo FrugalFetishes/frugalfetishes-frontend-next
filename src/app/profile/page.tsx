@@ -73,8 +73,9 @@ export default function ProfilePage() {
   }, [extras, snap]);
 
   const initialPrimary = useMemo(() => {
-    const fromExtras = clampStr(extras?.primaryPhotoUrl || extras?.avatarUrl || '');
-    const fromSnap = clampStr((snap as any)?.photoUrl || '');
+    const anyExtras: any = extras as any;
+    const fromExtras = clampStr(anyExtras?.primaryPhotoUrl || anyExtras?.avatarUrl || anyExtras?.photoUrl || anyExtras?.photoURL || '');
+    const fromSnap = clampStr((snap as any)?.photoUrl || (snap as any)?.photoURL || '');
     return fromExtras || fromSnap || initialGallery[0] || '';
   }, [extras, snap, initialGallery]);
 
