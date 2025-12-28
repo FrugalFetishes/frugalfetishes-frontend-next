@@ -195,7 +195,7 @@ export default function ProfilePage() {
       // Snapshot (core fields)
       upsertUserProfileSnapshot(uid, {
         id: uid,
-        displayName: displayName.trim() || uid,
+        displayName: displayName.trim(),
         fullName: fullName.trim(),
         email: '',
         photoUrl: primaryPhotoUrl || '',
