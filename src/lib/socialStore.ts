@@ -1,383 +1,374 @@
 'use client';
 
-type ProfileSnapshot = {
-  id: string;
-  displayName?: string;
-  fullName?: string;
-  email?: string;
-  photoUrl?: string;
-  updatedAt?: number;
-};
+/**
+ * FrugalFetishes Social Store
+ * LocalStorage-backed social graph + chat used by the Next.js UI.
+ * This file is intentionally self-contained and defensive to avoid deploy/type issues.
+ */
+
 export type Sex = 'male' | 'female';
 
-export type ProfileExtras = {
-  // Display fields
+export type Geo = { lat: number; lng: number };
+
+export type ProfileSnapshot = {
+  uid: string;
   displayName?: string;
+  photoUrl?: string;          // primary photo (string url/data-uri)
+  photos?: string[];          // gallery (urls/data-uris)
+  age?: number;
+  sex?: Sex;
+  zipCode?: string;
+  location?: Geo | null;      // best-effort geo (mobile), may be null
+  updatedAt?: number;         // ms epoch
+};
+
+export type ProfileExtras = {
   fullName?: string;
   headline?: string;
   bio?: string;
-
-  // Demographics
+  interests?: string[];
+  subscriptionTier?: 'free' | 'verified' | 'gold' | 'platinum' | string;
+  displayName?: string; // optional mirror
+  zipCode?: string;
   sex?: Sex;
   age?: number;
-
-  // Location
-  zipCode?: string;
-  location?: { lat: number; lng: number };
-
-  // Photos
-  photos?: string[];          // gallery URLs / data URIs
-  primaryPhotoUrl?: string;   // chosen primary photo
-  photoUrl?: string;          // legacy alias
+  location?: Geo | null;
 };
 
-
 export type Match = {
-  id: string;
-  a: string; // uid A
-  b: string; // uid B
-  createdAt: number;
+  id: string; // matchId
+  a: string;  // uid
+  b: string;  // uid
+  createdAt: number; // ms epoch
 };
 
 export type Message = {
   id: string;
   fromUserId: string;
-  toUserId?: string;
+  toUserId: string;
   text: string;
-  createdAt: number;
+  createdAt: number; // ms epoch
 };
 
-type Store = {
-  version: number;
+type Dict<T> = Record<string, T>;
 
-  // Lightweight profile snapshot shown on cards (what you see in Discover)
-  profilesById: Record<string, ProfileSnapshot>;
-
-  // Extra profile fields editable on /profile (kept separate so we can evolve without breaking cards)
-  extrasByUser: Record<string, ProfileExtras>;
-
-  // Like graph: likesByUser[fromUid][toUid] = timestamp
-  likesByUser: Record<string, Record<string, number>>;
-
-  // Matches: matchesByUser[uid][matchId] = Match
-  matchesByUser: Record<string, Record<string, Match>>;
-
-  // Unread chat counts: unreadByUser[uid][matchId] = count
-  unreadByUser: Record<string, Record<string, number>>;
-
-  // Clicked matches: clickedMatchesByUser[uid][matchId] = true
-  clickedMatchesByUser: Record<string, Record<string, boolean>>;
-
-  // Chat messages: chatsByMatchId[matchId] = ChatMessage[]
-  chatsByMatchId: Record<string, ChatMessage[]>;
+type StoreState = {
+  version: 1;
+  profilesByUid: Dict<ProfileSnapshot>;
+  extrasByUid: Dict<ProfileExtras>;
+  likesByUser: Dict<Dict<number>>;              // fromUid -> toUid -> ts
+  matchesByUser: Dict<Dict<Match>>;             // uid -> matchId -> match
+  clickedMatchesByUser: Dict<Dict<boolean>>;    // uid -> matchId -> clicked?
+  unreadByUser: Dict<Dict<number>>;             // uid -> matchId -> unread count
+  chatsByMatch: Dict<Message[]>;                // matchId -> messages
 };
 
+const STORAGE_KEY = 'ff_social_v1';
 
-const STORE_KEY = 'ff_social_store_v3';
-
-function isBrowser() {
-  return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
-}
-
-function safeJsonParse<T>(raw: string | null, fallback: T): T {
-  try {
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function blankStore(): Store {
-  return {
-    version: 3,
-    profilesById: {},
-    likesByUser: {},
-    matchesByUser: {},
-    chatsByMatch: {},
-    unreadByUser: {},
-    clickedMatchesByUser: {},
-    extrasByUser: {},
-  };
-}
-
-function load(): Store {
-  if (!isBrowser()) return blankStore();
-  return safeJsonParse<Store>(localStorage.getItem(STORE_KEY), blankStore());
-}
-
-function save(s: Store) {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(s));
-  } catch {}
-}
-
-function now() {
+function now(): number {
   return Date.now();
 }
 
 function clamp(n: any): number {
   const x = Number(n);
-  if (!Number.isFinite(x)) return 0;
-  return Math.max(0, Math.floor(x));
+  return Number.isFinite(x) && x > 0 ? x : 0;
 }
 
-function ensureMap<T extends Record<string, any>>(obj: Record<string, T>, key: string, init: () => T): T {
-  if (!obj[key]) obj[key] = init();
-  return obj[key];
-}
-
-function matchIdFor(a: string, b: string) {
-  const x = String(a || '').trim();
-  const y = String(b || '').trim();
-  const [u1, u2] = x < y ? [x, y] : [y, x];
-  return `m_${u1}__${u2}`;
-}
-
-function decodeJwtPayload(token: string): any | null {
+function safeParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
   try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const payload = parts[1];
-    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
-    const json = atob(b64 + pad);
-    return JSON.parse(json);
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function initialState(): StoreState {
+  return {
+    version: 1,
+    profilesByUid: {},
+    extrasByUid: {},
+    likesByUser: {},
+    matchesByUser: {},
+    clickedMatchesByUser: {},
+    unreadByUser: {},
+    chatsByMatch: {},
+  };
+}
+
+function load(): StoreState {
+  if (typeof window === 'undefined') return initialState();
+  const parsed = safeParse<StoreState>(window.localStorage.getItem(STORAGE_KEY));
+  if (!parsed || parsed.version !== 1) return initialState();
+
+  // Harden missing fields
+  return {
+    ...initialState(),
+    ...parsed,
+    profilesByUid: parsed.profilesByUid ?? {},
+    extrasByUid: parsed.extrasByUid ?? {},
+    likesByUser: parsed.likesByUser ?? {},
+    matchesByUser: parsed.matchesByUser ?? {},
+    clickedMatchesByUser: parsed.clickedMatchesByUser ?? {},
+    unreadByUser: parsed.unreadByUser ?? {},
+    chatsByMatch: parsed.chatsByMatch ?? {},
+  };
+}
+
+function save(s: StoreState) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function ensureMap<T>(root: Dict<T>, key: string, factory: () => T): T {
+  if (!root[key]) root[key] = factory();
+  return root[key];
+}
+
+function normalizeSex(v: any): Sex {
+  const s = String(v || '').toLowerCase().trim();
+  return s === 'female' ? 'female' : 'male';
+}
+
+function normalizeGeo(v: any): Geo | null {
+  try {
+    if (!v || typeof v !== 'object') return null;
+    const lat = Number((v as any).lat);
+    const lng = Number((v as any).lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
   } catch {
     return null;
   }
 }
 
 /**
- * Return a stable user identifier for a session token.
- * - If token looks like a JWT, prefer payload.sub / uid / user_id / email.
- * - If token is a plain string (like an email), use it directly.
- * - If token is missing, fall back to "anon".
- *
- * IMPORTANT: This function intentionally NEVER returns null to avoid
- * Next.js/TS "string | null" build errors across pages.
+ * Token -> UID
+ * Current app uses the token as the user identifier (email-like). Keep this forgiving.
  */
-export function uidFromToken(token: string | null | undefined): string {
-  const t = String(token || '').trim();
-  if (!t) return 'anon';
-
-  // JWT
-  if (t.includes('.') && t.split('.').length >= 2) {
-    const p = decodeJwtPayload(t);
-    const cand = String(p?.sub || p?.uid || p?.user_id || p?.userId || p?.email || '').trim();
-    return cand || t;
-  }
-
-  // Non-JWT token (often an email in this project)
-  return t;
+export function uidFromToken(token: string | null | undefined): string | null {
+  const t = (token ?? '').toString().trim();
+  return t ? t : null;
 }
 
-export function upsertUserProfileSnapshot(uid: string, patch: Partial<ProfileSnapshot>) {
-  if (!isBrowser()) return;
-  const id = String(uid || '').trim();
-  if (!id) return;
-
-  const s = load();
-  const prev = s.profilesById[id] || { id };
-  s.profilesById[id] = {
-    ...prev,
-    ...patch,
-    id,
-    updatedAt: now(),
-  };
-  save(s);
-}
+// ---- Profile snapshot helpers ----
 
 export function loadUserProfileSnapshot(uid: string): ProfileSnapshot | null {
-  const id = String(uid || '').trim();
-  if (!id) return null;
   const s = load();
-  return s.profilesById[id] || null;
+  return s.profilesByUid[uid] ?? null;
+}
+
+export function upsertUserProfileSnapshot(uid: string, patch: Partial<ProfileSnapshot>): ProfileSnapshot {
+  const s = load();
+  const prev = s.profilesByUid[uid] ?? { uid };
+  const next: ProfileSnapshot = {
+    ...prev,
+    ...patch,
+    uid,
+    sex: patch.sex !== undefined ? normalizeSex(patch.sex) : (prev.sex ? normalizeSex(prev.sex) : undefined),
+    location: patch.location !== undefined ? normalizeGeo(patch.location) : (prev.location ? normalizeGeo(prev.location) : null),
+    updatedAt: now(),
+  };
+
+  // Normalize photos
+  if (Array.isArray(next.photos)) {
+    next.photos = next.photos.filter(Boolean).map((x) => String(x));
+  }
+  if (next.photoUrl) next.photoUrl = String(next.photoUrl);
+
+  s.profilesByUid[uid] = next;
+  save(s);
+  return next;
+}
+
+export function getProfileExtras(uid: string): ProfileExtras {
+  const s = load();
+  return s.extrasByUid[uid] ?? {};
+}
+
+export function setProfileExtras(uid: string, patch: Partial<ProfileExtras>): ProfileExtras {
+  const s = load();
+  const prev = s.extrasByUid[uid] ?? {};
+  const next: ProfileExtras = {
+    ...prev,
+    ...patch,
+  };
+
+  // keep core fields consistent if provided
+  if (patch.sex !== undefined) next.sex = normalizeSex(patch.sex);
+  if (patch.location !== undefined) next.location = normalizeGeo(patch.location);
+  if (patch.age !== undefined) next.age = Number(patch.age);
+
+  s.extrasByUid[uid] = next;
+  save(s);
+
+  // mirror a few values into snapshot for discover cards
+  const snapPatch: Partial<ProfileSnapshot> = {};
+  if (patch.displayName !== undefined) snapPatch.displayName = String(patch.displayName);
+  if (patch.sex !== undefined) snapPatch.sex = normalizeSex(patch.sex);
+  if (patch.age !== undefined) snapPatch.age = Number(patch.age);
+  if (patch.zipCode !== undefined) snapPatch.zipCode = String(patch.zipCode);
+  if (patch.location !== undefined) snapPatch.location = normalizeGeo(patch.location);
+
+  if (Object.keys(snapPatch).length) upsertUserProfileSnapshot(uid, snapPatch);
+
+  return next;
+}
+
+// ---- Likes & matches ----
+
+export function createMatchId(a: string, b: string): string {
+  const x = String(a);
+  const y = String(b);
+  return x < y ? `${x}__${y}` : `${y}__${x}`;
 }
 
 /**
- * Record a "like" from fromUid -> toUid. If reciprocal like exists, creates a match.
- * Returns the matchId if a new match was created; otherwise null.
+ * Register a like. If reciprocal, create match for both sides.
+ * Returns created matchId if match created.
  */
 export function likeUser(fromUid: string, toUid: string): string | null {
-  const from = String(fromUid || '').trim();
-  const to = String(toUid || '').trim();
-  if (!from || !to || from === 'anon' || to === 'anon' || from === to) return null;
+  const from = String(fromUid);
+  const to = String(toUid);
+  if (!from || !to || from === to) return null;
 
   const s = load();
-  const likesFrom = ensureMap(s.likesByUser, from, () => ({} as Record<string, number>));
+
+  const likesFrom = ensureMap(s.likesByUser, from, () => ({} as Dict<number>)) as Dict<number>;
   likesFrom[to] = now();
 
-  const likesTo = ensureMap(s.likesByUser, to, () => ({} as Record<string, number>));
+  const likesTo = ensureMap(s.likesByUser, to, () => ({} as Dict<number>)) as Dict<number>;
   const isReciprocal = Boolean(likesTo[from]);
 
-  if (!isReciprocal) {
+  if (isReciprocal) {
+    const matchId = createMatchId(from, to);
+    const match: Match = { id: matchId, a: from < to ? from : to, b: from < to ? to : from, createdAt: now() };
+
+    const mFrom = ensureMap(s.matchesByUser, from, () => ({} as Dict<Match>)) as Dict<Match>;
+    const mTo = ensureMap(s.matchesByUser, to, () => ({} as Dict<Match>)) as Dict<Match>;
+
+    // only create once
+    if (!mFrom[matchId] && !mTo[matchId]) {
+      mFrom[matchId] = match;
+      mTo[matchId] = match;
+
+      // unread "new match" badge for both users until clicked
+      const clickedFrom = ensureMap(s.clickedMatchesByUser, from, () => ({} as Dict<boolean>)) as Dict<boolean>;
+      const clickedTo = ensureMap(s.clickedMatchesByUser, to, () => ({} as Dict<boolean>)) as Dict<boolean>;
+      clickedFrom[matchId] = false;
+      clickedTo[matchId] = false;
+    }
+
     save(s);
-    return null;
-  }
-
-  const mid = matchIdFor(from, to);
-  const match: Match = { id: mid, a: from < to ? from : to, b: from < to ? to : from, createdAt: now() };
-
-  const mFrom = ensureMap(s.matchesByUser, from, () => ({} as Record<string, Match>));
-  const mTo = ensureMap(s.matchesByUser, to, () => ({} as Record<string, Match>));
-
-  // Only create once
-  if (!mFrom[mid] && !mTo[mid]) {
-    mFrom[mid] = match;
-    mTo[mid] = match;
+    return matchId;
   }
 
   save(s);
-  return mid;
+  return null;
 }
 
 export function getMatchesFor(uid: string): Match[] {
-  const u = String(uid || '').trim();
-  if (!u) return [];
+  const u = String(uid);
   const s = load();
-  const m = s.matchesByUser[u] || {};
-  return Object.values(m).sort((a, b) => b.createdAt - a.createdAt);
+  const map = s.matchesByUser[u] ?? {};
+  return Object.values(map).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
-export function markMatchClicked(uid: string, matchId: string) {
-  const u = String(uid || '').trim();
-  const mid = String(matchId || '').trim();
+export function markMatchClicked(uid: string, matchId: string): void {
+  const u = String(uid);
+  const mid = String(matchId);
   if (!u || !mid) return;
   const s = load();
-  const map = ensureMap(s.clickedMatchesByUser, u, () => ({} as Record<string, boolean>));
+  const map = ensureMap(s.clickedMatchesByUser, u, () => ({} as Dict<boolean>)) as Dict<boolean>;
   map[mid] = true;
   save(s);
 }
 
-export function unreadCountForMatch(uid: string, matchId: string): number {
-  const u = String(uid || '').trim();
-  const mid = String(matchId || '').trim();
-  if (!u || !mid) return 0;
+export function isMatchClicked(uid: string, matchId: string): boolean {
+  const u = String(uid);
+  const mid = String(matchId);
+  if (!u || !mid) return true;
   const s = load();
-  return clamp(s.unreadByUser?.[u]?.[mid] || 0);
+  const map = s.clickedMatchesByUser[u] ?? {};
+  const v = map[mid];
+  return v === true;
 }
 
-export function incrementUnread(uid: string, matchId: string, amount: number = 1) {
-  const u = String(uid || '').trim();
-  const mid = String(matchId || '').trim();
+// ---- Chat ----
+
+export function getChat(matchId: string): Message[] {
+  const mid = String(matchId);
+  const s = load();
+  return (s.chatsByMatch[mid] ?? []).slice().sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+}
+
+export function addChatMessage(matchId: string, fromUid: string, toUid: string, text: string): Message {
+  const mid = String(matchId);
+  const from = String(fromUid);
+  const to = String(toUid);
+  const t = String(text ?? '').trim();
+  const s = load();
+
+  const msg: Message = { id: `${now()}_${Math.random().toString(16).slice(2)}`, fromUserId: from, toUserId: to, text: t, createdAt: now() };
+  const arr = ensureMap(s.chatsByMatch, mid, () => ([] as Message[])) as Message[];
+  arr.push(msg);
+
+  // increment unread for recipient
+  incrementUnread(to, mid, 1);
+
+  save(s);
+  return msg;
+}
+
+export function unreadCountForMatch(uid: string, matchId: string): number {
+  const u = String(uid);
+  const mid = String(matchId);
+  const s = load();
+  const map = s.unreadByUser[u] ?? {};
+  return clamp(map[mid] ?? 0);
+}
+
+export function incrementUnread(uid: string, matchId: string, amount: number = 1): void {
+  const u = String(uid);
+  const mid = String(matchId);
   if (!u || !mid) return;
   const s = load();
-  const map = ensureMap(s.unreadByUser, u, () => ({} as Record<string, number>));
-  map[mid] = clamp(map[mid] || 0) + clamp(amount);
+  const map = ensureMap(s.unreadByUser, u, () => ({} as Dict<number>)) as Dict<number>;
+  map[mid] = clamp(map[mid] ?? 0) + clamp(amount);
   save(s);
 }
 
-export function clearUnreadForChat(uid: string, matchId: string) {
-  const u = String(uid || '').trim();
-  const mid = String(matchId || '').trim();
-  if (!u || !mid) return;
+export function clearUnreadForChat(uid: string, matchId: string): void {
+  const u = String(uid);
+  const mid = String(matchId);
   const s = load();
-  const map = ensureMap(s.unreadByUser, u, () => ({} as Record<string, number>));
+  const map = ensureMap(s.unreadByUser, u, () => ({} as Dict<number>)) as Dict<number>;
   map[mid] = 0;
   save(s);
 }
 
-export function getChat(matchId: string): Message[] {
-  const mid = String(matchId || '').trim();
-  if (!mid) return [];
-  const s = load();
-  return (s.chatsByMatch[mid] || []).slice().sort((a, b) => a.createdAt - b.createdAt);
-}
-
-/**
- * addChatMessage supports two call patterns used during earlier iterations:
- *  1) addChatMessage(matchId, { fromUserId, toUserId?, text })
- *  2) addChatMessage(matchId, fromUid, toUid, text)
- */
-export function addChatMessage(matchId: string, a: any, b?: any, c?: any) {
-  const mid = String(matchId || '').trim();
-  if (!mid) return;
-
-  // Supports:
-  // 1) addChatMessage(matchId, { fromUserId, toUserId?, text })
-  // 2) addChatMessage(matchId, fromUid, toUid, text)
-  let fromUserId = '';
-  let toUserId: string | undefined = undefined;
-  let text = '';
-
-  if (typeof a === 'object' && a) {
-    fromUserId = String((a as any).fromUserId || (a as any).from || (a as any).fromUid || '').trim();
-    toUserId = (a as any).toUserId ? String((a as any).toUserId).trim() : undefined;
-    text = String((a as any).text || '').trim();
-  } else {
-    fromUserId = String(a || '').trim();
-    toUserId = b != null ? String(b).trim() : undefined;
-    text = String(c || '').trim();
-  }
-
-  if (!fromUserId || !text) return;
-
-  // If toUserId missing, derive it from matchId shape: "m_<u1>__<u2>"
-  if (!toUserId) {
-    try {
-      const raw = mid.startsWith('m_') ? mid.slice(2) : mid;
-      const parts = raw.split('__');
-      if (parts.length === 2) {
-        const [u1, u2] = parts;
-        toUserId = (fromUserId === u1 ? u2 : fromUserId === u2 ? u1 : undefined);
-      }
-    } catch {}
-  }
-
-  const s = load();
-  const arr = ensureMap(s.chatsByMatch, mid, () => []);
-  const msg: Message = {
-    id: `msg_${now()}_${Math.random().toString(36).slice(2, 8)}`,
-    fromUserId,
-    toUserId,
-    text,
-    createdAt: now(),
-  };
-  arr.push(msg);
-
-  // Increment unread for recipient so AppHeader badgeCounts updates.
-  if (toUserId && toUserId !== fromUserId) {
-    const umap = ensureMap(s.unreadByUser, toUserId, () => ({} as Record<string, number>));
-    umap[mid] = clamp(umap[mid] || 0) + 1;
-  }
-
-  save(s);
-}
+// ---- Badges (hamburger) ----
 
 export function badgeCounts(uid: string): { total: number; matches: number; messages: number } {
-  const u = String(uid || '').trim();
-  if (!u) return { total: 0, matches: 0, messages: 0 };
+  const u = String(uid);
   const s = load();
 
-  // New matches = matches that exist but not clicked yet
-  const clicked = s.clickedMatchesByUser?.[u] || {};
-  const matches = getMatchesFor(u);
-  const newMatches = matches.filter((m) => !clicked[m.id]).length;
+  // matches = count of unclicked matches
+  const matchesMap = s.matchesByUser[u] ?? {};
+  const clickedMap = s.clickedMatchesByUser[u] ?? {};
+  const newMatches = Object.keys(matchesMap).reduce((acc, mid) => acc + (clickedMap[mid] === false ? 1 : 0), 0);
 
-  // Unread messages sum
-  const unreadMap = s.unreadByUser?.[u] || {};
-  const unread = Object.values(unreadMap).reduce((acc, n) => acc + clamp(n), 0);
+  // messages = total unread across matches
+  const unreadMap = s.unreadByUser[u] ?? {};
+  const unreadTotal = Object.values(unreadMap).reduce((acc, v) => acc + clamp(v), 0);
 
-  return { total: clamp(newMatches + unread), matches: clamp(newMatches), messages: clamp(unread) };
+  return {
+    total: clamp(newMatches + unreadTotal),
+    matches: clamp(newMatches),
+    messages: clamp(unreadTotal),
+  };
 }
-
-export function getProfileExtras(uid: string): any {
-  const u = String(uid || '').trim();
-  if (!u) return {};
-  const s = load();
-  return s.extrasByUser[u] || {};
-}
-
-export function setProfileExtras(uid: string, patch: any) {
-  const u = String(uid || '').trim();
-  if (!u) return;
-  const s = load();
-  const prev = s.extrasByUser[u] || {};
-  s.extrasByUser[u] = { ...prev, ...(patch || {}) };
-  save(s);
-}
-
-// ---- Compatibility aliases (older imports) ----
-export const getMatchesForUser = getMatchesFor;
