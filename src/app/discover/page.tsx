@@ -263,25 +263,6 @@ export default function DiscoverPage() {
   }, [myLoc, currentLoc]);
 
 
-  const distanceMi = useMemo(() => {
-    try {
-      if (!myLoc || !currentLoc) return null;
-      const R = 3958.8; // miles
-      const toRad = (x: number) => (x * Math.PI) / 180;
-      const dLat = toRad(currentLoc.lat - myLoc.lat);
-      const dLng = toRad(currentLoc.lng - myLoc.lng);
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(toRad(myLoc.lat)) * Math.cos(toRad(currentLoc.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const d = R * c;
-      if (!Number.isFinite(d)) return null;
-      return Math.round(d * 10) / 10;
-    } catch {
-      return null;
-    }
-  }, [myLoc, currentLoc]);
-
   const currentAbout = useMemo(() => {
     try {
       const anyCur: any = current as any;
