@@ -22,6 +22,24 @@ type Counts = {
   messages: number;
 };
 
+function normalizeWelcomeName(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+
+  // If it's an email, prefer the part before @
+  if (s.includes('@')) {
+    const local = s.split('@')[0].trim();
+    if (!local) return '';
+    return local.charAt(0).toUpperCase() + local.slice(1);
+  }
+
+  // If it's a long opaque id/token-ish string, don't show it
+  if (/^[A-Za-z0-9_-]{18,}$/.test(s)) return '';
+
+  // Otherwise return as-is
+  return s;
+}
+
 function clamp(n: unknown): number {
   const x = typeof n === 'number' ? n : Number(n);
   if (!Number.isFinite(x) || x <= 0) return 0;
@@ -98,16 +116,31 @@ export default function AppHeader(props: {
   }, []);
 
   const displayName = useMemo(() => {
-    try {
-      if (!uid || uid === 'anon') return '';
-      const extras = getProfileExtras(uid) as any;
-      const snap = loadUserProfileSnapshot(uid) as any;
-      const name = (extras?.displayName || snap?.displayName || extras?.email || snap?.email || '').toString().trim();
-      return name;
-    } catch {
-      return '';
+  try {
+    if (!uid || uid === 'anon') return '';
+    const extras = (getProfileExtras(uid) as any) || {};
+    const snap = (loadUserProfileSnapshot(uid) as any) || {};
+
+    const candidates = [
+      extras.displayName,
+      extras.fullName,
+      extras.name,
+      snap.displayName,
+      snap.fullName,
+      snap.name,
+      extras.email,
+      snap.email,
+    ];
+
+    for (const c of candidates) {
+      const n = normalizeWelcomeName(c);
+      if (n) return n;
     }
-  }, [uid]);
+    return '';
+  } catch {
+    return '';
+  }
+}, [uid]);
 
   const headerLabel = useMemo(() => {
     const name = (displayName || '').toString().trim();
