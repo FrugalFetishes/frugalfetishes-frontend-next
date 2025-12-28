@@ -18,6 +18,7 @@ export type ProfileSnapshot = {
   age?: number;
   sex?: Sex;
   zipCode?: string;
+  city?: string; // legacy compatibility (some pages used city for proximity)
   location?: Geo | null;      // best-effort geo (mobile), may be null
   updatedAt?: number;         // ms epoch
 };
@@ -30,6 +31,7 @@ export type ProfileExtras = {
   subscriptionTier?: 'free' | 'verified' | 'gold' | 'platinum' | string;
   displayName?: string; // optional mirror
   zipCode?: string;
+  city?: string; // legacy compatibility (some pages used city for proximity)
   sex?: Sex;
   age?: number;
   location?: Geo | null;
@@ -303,7 +305,7 @@ export function setProfileExtras(uid: string, patch: Partial<ProfileExtras>): Pr
   // (This happened during earlier zip/city experiments.)
   const prevAny: any = prev as any;
   const nextAny: any = next as any;
-  for (const k of ['displayName', 'fullName', 'headline', 'bio', 'zipCode'] as const) {
+  for (const k of ['displayName', 'fullName', 'headline', 'bio', 'zipCode', 'city'] as const) {
     const incoming = (patch as any)?.[k];
     if (incoming === '' && prevAny?.[k]) nextAny[k] = prevAny[k];
   }
@@ -325,6 +327,11 @@ export function setProfileExtras(uid: string, patch: Partial<ProfileExtras>): Pr
   if (patch.zipCode !== undefined) {
     snapPatch.zipCode = String(patch.zipCode);
     (snapPatch as any).city = String(patch.zipCode); // legacy mirror
+  }
+  if ((patch as any).city !== undefined) {
+    (snapPatch as any).city = String((patch as any).city);
+    // also mirror into zipCode for new flows
+    snapPatch.zipCode = String((patch as any).city);
   }
   if (patch.location !== undefined) snapPatch.location = normalizeGeo(patch.location);
 
