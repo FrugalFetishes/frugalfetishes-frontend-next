@@ -146,7 +146,7 @@ type SwipeLabel = 'like' | 'pass' | null;
 export default function DiscoverPage() {
   const myUid = useMemo(() => {
     try {
-      return uidFromToken(requireSession());
+      return uidFromToken(requireSession()) || 'anon';
     } catch {
       return 'anon';
     }
