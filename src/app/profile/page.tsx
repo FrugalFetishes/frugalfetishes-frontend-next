@@ -35,6 +35,8 @@ function normalizePhotoUrl(url: string) {
   return ensureHttps(url).trim();
 }
 
+const PROFILE_PAGE_VERSION = 'PROFILE_ZIP_AGE_SEX_V1';
+
 export default function ProfilePage() {
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
@@ -200,10 +202,10 @@ export default function ProfilePage() {
         email: '',
         photoUrl: primaryPhotoUrl || '',
         updatedAt: Date.now(),
-        sex: sex || 'any',
-        age: Number(age) || 0,
+        sex: (sex && sex !== 'any') ? sex : undefined,
+        age: (Number(age) > 0 ? Number(age) : undefined),
         zipCode: cleanZip,
-        city: cleanZip, // legacy mirror for older proximity logic
+        city: cleanZip,
         location: initialLocation || null,
       } as any);
 
@@ -213,10 +215,10 @@ export default function ProfilePage() {
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
-        sex: sex || 'any',
-        age: Number(age) || 0,
+        sex: (sex && sex !== 'any') ? sex : undefined,
+        age: (Number(age) > 0 ? Number(age) : undefined),
         zipCode: cleanZip,
-        city: cleanZip, // legacy mirror for older proximity logic
+        city: cleanZip,
         location: initialLocation || null,
 
         // photo keys (keep compatibility across older UI)
