@@ -61,7 +61,7 @@ export default function MatchProfilePage() {
   }, [match, myUid]);
 
   const snap = useMemo(() => (otherUid ? loadUserProfileSnapshot(otherUid) : null), [otherUid]);
-  const name = (snap?.displayName || snap?.fullName || otherUid || 'Match').toString();
+  const name = (snap?.displayName || otherUid || 'Match').toString();
   const photo = (snap?.photoUrl || '').toString() || placeholderAvatarDataUri(name);
 
   function onOpenChat() {
