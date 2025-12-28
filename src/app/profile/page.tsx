@@ -107,7 +107,7 @@ export default function ProfilePage() {
   const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
   const [headline, setHeadline] = useState<string>(clampStr(extrasAny?.headline || ''));
-  const [about, setAbout] = useState<string>(clampStr(extrasAny?.about || ''));
+  const [about, setAbout] = useState<string>(clampStr(extrasAny?.bio || ''));
   const [primaryPhotoUrl, setPrimaryPhotoUrl] = useState<string>(clampStr(initialPrimary));
   const [gallery, setGallery] = useState<string[]>(initialGallery);
   const effectivePrimary = useMemo(() => normalizePhotoUrl(primaryPhotoUrl || ''), [primaryPhotoUrl]);
@@ -203,7 +203,7 @@ export default function ProfilePage() {
         displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
-        about: about.trim(),
+        bio: about.trim(),
         primaryPhotoUrl: primaryPhotoUrl || '',
         gallery: gallery,
       });
