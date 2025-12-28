@@ -322,7 +322,10 @@ export function setProfileExtras(uid: string, patch: Partial<ProfileExtras>): Pr
   if (patch.displayName !== undefined) snapPatch.displayName = String(patch.displayName);
   if (patch.sex !== undefined) snapPatch.sex = normalizeSex(patch.sex);
   if (patch.age !== undefined) snapPatch.age = Number(patch.age);
-  if (patch.zipCode !== undefined) snapPatch.zipCode = String(patch.zipCode);
+  if (patch.zipCode !== undefined) {
+    snapPatch.zipCode = String(patch.zipCode);
+    (snapPatch as any).city = String(patch.zipCode); // legacy mirror
+  }
   if (patch.location !== undefined) snapPatch.location = normalizeGeo(patch.location);
 
   if (Object.keys(snapPatch).length) upsertUserProfileSnapshot(uid, snapPatch);
