@@ -374,7 +374,7 @@ toast('Saved!');
         <div style={card}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile (ZIP v1)</div>
               <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
             </div>
             <button type="button" style={btn} onClick={save}>
