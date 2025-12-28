@@ -5,25 +5,32 @@ type ProfileSnapshot = {
   displayName?: string;
   fullName?: string;
   email?: string;
-
-  // Photos
   photoUrl?: string;
-  primaryPhotoUrl?: string;
-  gallery?: string[];
-
-  // Demographics
-  age?: number;
-  sex?: 'any' | 'male' | 'female' | 'nonbinary' | string;
-  city?: string;
-  location?: { lat: number; lng: number };
-
-  // Optional profile text
-  headline?: string;
-  about?: string;
-  bio?: string;
-
   updatedAt?: number;
 };
+export type Sex = 'male' | 'female';
+
+export type ProfileExtras = {
+  // Display fields
+  displayName?: string;
+  fullName?: string;
+  headline?: string;
+  bio?: string;
+
+  // Demographics
+  sex?: Sex;
+  age?: number;
+
+  // Location
+  zipCode?: string;
+  location?: { lat: number; lng: number };
+
+  // Photos
+  photos?: string[];          // gallery URLs / data URIs
+  primaryPhotoUrl?: string;   // chosen primary photo
+  photoUrl?: string;          // legacy alias
+};
+
 
 export type Match = {
   id: string;
@@ -42,14 +49,29 @@ export type Message = {
 
 type Store = {
   version: number;
+
+  // Lightweight profile snapshot shown on cards (what you see in Discover)
   profilesById: Record<string, ProfileSnapshot>;
-  likesByUser: Record<string, Record<string, number>>; // fromUid -> toUid -> ts
-  matchesByUser: Record<string, Record<string, Match>>; // uid -> matchId -> Match
-  chatsByMatch: Record<string, Message[]>;
-  unreadByUser: Record<string, Record<string, number>>; // uid -> matchId -> unread count
-  clickedMatchesByUser: Record<string, Record<string, boolean>>; // uid -> matchId -> clicked
-  extrasByUser: Record<string, any>;
+
+  // Extra profile fields editable on /profile (kept separate so we can evolve without breaking cards)
+  extrasByUser: Record<string, ProfileExtras>;
+
+  // Like graph: likesByUser[fromUid][toUid] = timestamp
+  likesByUser: Record<string, Record<string, number>>;
+
+  // Matches: matchesByUser[uid][matchId] = Match
+  matchesByUser: Record<string, Record<string, Match>>;
+
+  // Unread chat counts: unreadByUser[uid][matchId] = count
+  unreadByUser: Record<string, Record<string, number>>;
+
+  // Clicked matches: clickedMatchesByUser[uid][matchId] = true
+  clickedMatchesByUser: Record<string, Record<string, boolean>>;
+
+  // Chat messages: chatsByMatchId[matchId] = ChatMessage[]
+  chatsByMatchId: Record<string, ChatMessage[]>;
 };
+
 
 const STORE_KEY = 'ff_social_store_v3';
 
@@ -227,15 +249,6 @@ export function markMatchClicked(uid: string, matchId: string) {
   const map = ensureMap(s.clickedMatchesByUser, u, () => ({} as Record<string, boolean>));
   map[mid] = true;
   save(s);
-}
-
-export function isMatchClicked(uid: string, matchId: string): boolean {
-  const u = String(uid || '').trim();
-  const mid = String(matchId || '').trim();
-  if (!u || !mid) return false;
-  const s = load();
-  const map = (s.clickedMatchesByUser?.[u] || {}) as Record<string, boolean>;
-  return Boolean(map[mid]);
 }
 
 export function unreadCountForMatch(uid: string, matchId: string): number {
