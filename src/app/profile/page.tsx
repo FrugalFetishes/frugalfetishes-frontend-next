@@ -93,7 +93,7 @@ export default function ProfilePage() {
   const initialZipCode = useMemo(() => {
     const ex: any = extras as any;
     const sn: any = snap as any;
-    return String(ex?.zipCode ?? ex?.zip ?? sn?.zipCode ?? sn?.zip ?? '').toString();
+    return String(ex?.zipCode ?? ex?.zip ?? ex?.postalCode ?? ex?.city ?? sn?.zipCode ?? sn?.zip ?? sn?.postalCode ?? sn?.city ?? '').toString();
   }, [extras, snap]);
 
   const initialLocation = useMemo(() => {
@@ -191,40 +191,26 @@ export default function ProfilePage() {
   function save() {
     try {
       const cleanZip = zipCode.trim();
-
-      // Snapshot (core fields)
+      // Snapshot: keep it minimal (types)
       upsertUserProfileSnapshot(uid, {
         id: uid,
-        displayName: displayName.trim(),
+        displayName: displayName.trim() || uid,
         fullName: fullName.trim(),
         email: '',
         photoUrl: primaryPhotoUrl || '',
         updatedAt: Date.now(),
-        sex: sex || 'any',
-        age: Number(age) || 0,
-        zipCode: cleanZip,
-        location: initialLocation || null,
       } as any);
 
-      // Extras (editable profile fields + gallery)
+      // Extras: richer profile + gallery
       setProfileExtras(uid, ({
-        displayName: (displayName.trim() || uid),
+        displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
-        sex: sex || 'any',
-        age: Number(age) || 0,
-        zipCode: cleanZip,
-        location: initialLocation || null,
-
-        // photo keys (keep compatibility across older UI)
-        primaryPhotoUrl: primaryPhotoUrl || '',
         avatarUrl: primaryPhotoUrl || '',
         galleryUrls: gallery,
-        gallery: gallery,
       } as any));
-
-      toast('Saved!');
+toast('Saved!');
     } catch (e: any) {
       toast('Save failed');
       console.error(e);
