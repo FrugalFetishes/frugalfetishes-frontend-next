@@ -6,7 +6,7 @@
  * This file is intentionally self-contained and defensive to avoid deploy/type issues.
  */
 
-export type Sex = 'male' | 'female';
+export type Sex = 'any' | 'male' | 'female';
 
 export type Geo = { lat: number; lng: number };
 
@@ -174,8 +174,9 @@ function ensureMap<T>(root: Dict<T>, key: string, factory: () => T): T {
 }
 
 function normalizeSex(v: any): Sex {
-  const s = String(v || '').toLowerCase().trim();
-  return s === 'female' ? 'female' : 'male';
+  const s = String(v ?? '').toLowerCase().trim();
+  if (s === 'male' || s === 'female' || s === 'any') return s as Sex;
+  return 'any';
 }
 
 function normalizeGeo(v: any): Geo | null {
