@@ -36,7 +36,7 @@ function normalizePhotoUrl(url: string) {
 }
 
 export default function ProfilePage() {
-  const PROFILE_PAGE_MARKER = 'ROLLBACK_WORKING__ZIP_AGE_SEX_HYDRATE_V1';
+  const PROFILE_PAGE_MARKER = 'TEST-123';
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
 
@@ -107,51 +107,7 @@ export default function ProfilePage() {
   const [sex, setSex] = useState<string>(initialSex);
   const [zipCode, setZipCode] = useState<string>(initialZipCode);
 
-  
-
-
-
-// --- ROLLBACK SAFE HYDRATION (pristine only) ---
-const hydratedUidRef = useRef<string>('');
-const dirtyRef = useRef<boolean>(false);
-
-const extrasAny: any = extras as any;
-const initialDisplayName = clampStr(snap?.displayName || extrasAny?.displayName || '');
-const initialFullName = clampStr(extrasAny?.fullName || '');
-const initialHeadline = clampStr(extrasAny?.headline || '');
-const initialAbout = clampStr(extrasAny?.about || '');
-const hydratedSex = clampStr(extrasAny?.sex || '');
-const hydratedAge = typeof extrasAny?.age === 'number' ? extrasAny.age : (extrasAny?.age ? Number(extrasAny.age) : '');
-const hydratedZip = clampStr(extrasAny?.zipCode || extrasAny?.zip || '');
-
-// Once per uid: if user hasn't typed yet, sync form fields from stored values.
-useEffect(() => {
-  if (!uid) return;
-  if (dirtyRef.current) return;
-  if (hydratedUidRef.current === uid) return;
-
-  const hasStored =
-    Boolean(initialDisplayName) ||
-    Boolean(initialFullName) ||
-    Boolean(initialHeadline) ||
-    Boolean(initialAbout) ||
-    Boolean(hydratedSex) ||
-    Boolean(hydratedAge) ||
-    Boolean(hydratedZip);
-
-  if (!hasStored) return;
-
-  setDisplayName(initialDisplayName);
-  setFullName(initialFullName);
-  setHeadline(initialHeadline);
-  setAbout(initialAbout);
-  setSex(hydratedSex);
-  setAge(hydratedAge as any);
-  setZipCode(hydratedZip);
-
-  hydratedUidRef.current = uid;
-}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, hydratedSex, hydratedAge, hydratedZip]);
-const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
+  const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
   const [headline, setHeadline] = useState<string>(clampStr(extrasAny?.headline || ''));
   const [about, setAbout] = useState<string>(clampStr(extrasAny?.bio || ''));
@@ -173,7 +129,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
     } else {
       if (gallery.length) setPrimaryPhotoUrl(gallery[0]);
     }
-  }, [gallery]);
+  }, [gallery, primaryPhotoUrl]);
 
   function toast(msg: string) {
     setStatus(msg);
@@ -253,7 +209,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
 
       // Extras (editable profile fields + gallery)
       setProfileExtras(uid, ({
-        displayName: displayName.trim(),
+        displayName: (displayName.trim() || uid),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
@@ -529,11 +485,11 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
           <div style={row}>
             <div>
               <div style={label}>Display name</div>
-              <input value={displayName} onChange={(e) => { dirtyRef.current = true; setDisplayName(e.target.value)} style={input} />
+              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={input} />
             </div>
             <div>
               <div style={label}>Full name</div>
-              <input value={fullName} onChange={(e) => { dirtyRef.current = true; setFullName(e.target.value)} style={input} />
+              <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={input} />
             </div>
           </div>
 
@@ -541,7 +497,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
           <div style={row}>
             <div>
               <div style={label}>Sex</div>
-              <select value={sex} onChange={(e) => { dirtyRef.current = true; setSex(e.target.value)} style={input as any}>
+              <select value={sex} onChange={(e) => setSex(e.target.value)} style={input as any}>
                 <option value="any">Any</option>
                 <option value="female">Female</option>
                 <option value="male">Male</option>
@@ -563,7 +519,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
             </div>
             <div>
               <div style={label}>ZIP code</div>
-              <input value={zipCode} onChange={(e) => { dirtyRef.current = true; setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
             </div>
           </div>
 
@@ -571,7 +527,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
           <div style={row}>
             <div>
               <div style={label}>Headline</div>
-              <input value={headline} onChange={(e) => { dirtyRef.current = true; setHeadline(e.target.value)} style={input} />
+              <input value={headline} onChange={(e) => setHeadline(e.target.value)} style={input} />
             </div>
             <div>
               <div style={label}>Profile photo URL (auto from selection)</div>
@@ -586,7 +542,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
 
           <div style={{ marginTop: 12 }}>
             <div style={label}>About</div>
-            <textarea value={about} onChange={(e) => { dirtyRef.current = true; setAbout(e.target.value)} style={textarea} />
+            <textarea value={about} onChange={(e) => setAbout(e.target.value)} style={textarea} />
           </div>
         </div>
       </div>
