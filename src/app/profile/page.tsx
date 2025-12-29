@@ -36,7 +36,7 @@ function normalizePhotoUrl(url: string) {
 }
 
 export default function ProfilePage() {
-  const PROFILE_PAGE_MARKER = 'TEST-123';
+  const PROFILE_PAGE_MARKER = 'ROLLBACK_WORKING__ZIP_AGE_SEX_HYDRATE_V1';
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
 
@@ -107,7 +107,44 @@ export default function ProfilePage() {
   const [sex, setSex] = useState<string>(initialSex);
   const [zipCode, setZipCode] = useState<string>(initialZipCode);
 
-  const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
+  
+
+// PROFILE_HYDRATE_V1: hydrate controlled inputs after extras/snap load (prevents age/sex/zip from staying default)
+const hydratedRef = React.useRef<string>('');
+
+useEffect(() => {
+  if (!uid) return;
+  if (hydratedRef.current === uid) return;
+
+  // Only hydrate if we have any stored data (avoid clobbering user typing).
+  const hasStored =
+    Boolean(initialDisplayName) ||
+    Boolean(initialFullName) ||
+    Boolean(initialHeadline) ||
+    Boolean(initialAbout) ||
+    Boolean(initialSex) ||
+    Boolean(initialAge) ||
+    Boolean(initialZip) ||
+    Boolean(primaryPhotoUrl) ||
+    (Array.isArray(gallery) && gallery.length > 0);
+
+  if (!hasStored) {
+    hydratedRef.current = uid;
+    return;
+  }
+
+  setDisplayName(initialDisplayName);
+  setFullName(initialFullName);
+  setHeadline(initialHeadline);
+  setAbout(initialAbout);
+  setSex(initialSex || 'any');
+  setAge(Number(initialAge) || 0);
+  setZipCode(initialZip);
+
+  hydratedRef.current = uid;
+}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip, primaryPhotoUrl]);
+
+const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
   const [headline, setHeadline] = useState<string>(clampStr(extrasAny?.headline || ''));
   const [about, setAbout] = useState<string>(clampStr(extrasAny?.bio || ''));
@@ -209,7 +246,7 @@ export default function ProfilePage() {
 
       // Extras (editable profile fields + gallery)
       setProfileExtras(uid, ({
-        displayName: (displayName.trim() || uid),
+        displayName: displayName.trim(),
         fullName: fullName.trim(),
         headline: headline.trim(),
         bio: about.trim(),
