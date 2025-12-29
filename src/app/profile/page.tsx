@@ -109,6 +109,13 @@ export default function ProfilePage() {
 
   
 
+// Derived initial text fields (from extras/snapshot) used for hydration.
+const initialDisplayName = clampStr((extras as any)?.displayName ?? (snap as any)?.displayName ?? '');
+const initialFullName = clampStr((extras as any)?.fullName ?? (snap as any)?.fullName ?? '');
+const initialHeadline = clampStr((extras as any)?.headline ?? (snap as any)?.headline ?? '');
+const initialAbout = clampStr((extras as any)?.about ?? (extras as any)?.bio ?? (snap as any)?.about ?? (snap as any)?.bio ?? '');
+const initialZip = clampStr((extras as any)?.zipCode ?? (extras as any)?.zip ?? (extras as any)?.postalCode ?? (snap as any)?.zipCode ?? (snap as any)?.zip ?? (snap as any)?.postalCode ?? '');
+
 // PROFILE_HYDRATE_V1: hydrate controlled inputs after extras/snap load (prevents age/sex/zip from staying default)
 const hydratedRef = React.useRef<string>('');
 
@@ -139,7 +146,7 @@ useEffect(() => {
   setAbout(initialAbout);
   setSex(initialSex || 'any');
   setAge(Number(initialAge) || 0);
-  setZipCode(initialZip);
+  setZipCode(initialZip || initialZipCode);
 
   hydratedRef.current = uid;
 }, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip, primaryPhotoUrl]);
