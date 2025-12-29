@@ -36,7 +36,7 @@ function normalizePhotoUrl(url: string) {
 }
 
 export default function ProfilePage() {
-  const PROFILE_PAGE_MARKER = 'PROFILE_ZIP_V5';
+  const PROFILE_PAGE_MARKER = 'TEST-123';
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
 
