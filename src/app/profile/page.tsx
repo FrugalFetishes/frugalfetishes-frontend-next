@@ -149,7 +149,7 @@ useEffect(() => {
   setZipCode(initialZip || initialZipCode);
 
   hydratedRef.current = uid;
-}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip, primaryPhotoUrl]);
+}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip]);
 
 const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
@@ -173,7 +173,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
     } else {
       if (gallery.length) setPrimaryPhotoUrl(gallery[0]);
     }
-  }, [gallery, primaryPhotoUrl]);
+  }, [gallery]);
 
   function toast(msg: string) {
     setStatus(msg);
