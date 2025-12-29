@@ -120,9 +120,9 @@ const initialDisplayName = clampStr(snap?.displayName || extrasAny?.displayName 
 const initialFullName = clampStr(extrasAny?.fullName || '');
 const initialHeadline = clampStr(extrasAny?.headline || '');
 const initialAbout = clampStr(extrasAny?.about || '');
-const initialSex = clampStr(extrasAny?.sex || '');
-const initialAge = typeof extrasAny?.age === 'number' ? extrasAny.age : (extrasAny?.age ? Number(extrasAny.age) : '');
-const initialZip = clampStr(extrasAny?.zipCode || extrasAny?.zip || '');
+const hydratedSex = clampStr(extrasAny?.sex || '');
+const hydratedAge = typeof extrasAny?.age === 'number' ? extrasAny.age : (extrasAny?.age ? Number(extrasAny.age) : '');
+const hydratedZip = clampStr(extrasAny?.zipCode || extrasAny?.zip || '');
 
 // Once per uid: if user hasn't typed yet, sync form fields from stored values.
 useEffect(() => {
@@ -135,9 +135,9 @@ useEffect(() => {
     Boolean(initialFullName) ||
     Boolean(initialHeadline) ||
     Boolean(initialAbout) ||
-    Boolean(initialSex) ||
-    Boolean(initialAge) ||
-    Boolean(initialZip);
+    Boolean(hydratedSex) ||
+    Boolean(hydratedAge) ||
+    Boolean(hydratedZip);
 
   if (!hasStored) return;
 
@@ -145,36 +145,12 @@ useEffect(() => {
   setFullName(initialFullName);
   setHeadline(initialHeadline);
   setAbout(initialAbout);
-  setSex(initialSex);
-  setAge(initialAge as any);
-  setZipCode(initialZip);
+  setSex(hydratedSex);
+  setAge(hydratedAge as any);
+  setZipCode(hydratedZip);
 
   hydratedUidRef.current = uid;
-}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip]);
-// Derived initial text fields (from extras/snapshot) used for hydration.
-const initialDisplayName = clampStr((extras as any)?.displayName ?? (snap as any)?.displayName ?? '');
-const initialFullName = clampStr((extras as any)?.fullName ?? (snap as any)?.fullName ?? '');
-const initialHeadline = clampStr((extras as any)?.headline ?? (snap as any)?.headline ?? '');
-const initialAbout = clampStr((extras as any)?.about ?? (extras as any)?.bio ?? (snap as any)?.about ?? (snap as any)?.bio ?? '');
-const initialZip = clampStr((extras as any)?.zipCode ?? (extras as any)?.zip ?? (extras as any)?.postalCode ?? (snap as any)?.zipCode ?? (snap as any)?.zip ?? (snap as any)?.postalCode ?? '');
-
-// PROFILE_HYDRATE_V1: hydrate controlled inputs after extras/snap load (prevents age/sex/zip from staying default)
-if (!hasStored) {
-    hydratedRef.current = uid;
-    return;
-  }
-
-  setDisplayName(initialDisplayName);
-  setFullName(initialFullName);
-  setHeadline(initialHeadline);
-  setAbout(initialAbout);
-  setSex(initialSex || 'any');
-  setAge(Number(initialAge) || 0);
-  setZipCode(initialZip || initialZipCode);
-
-  hydratedRef.current = uid;
-}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip]);
-
+}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, hydratedSex, hydratedAge, hydratedZip]);
 const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
   const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
   const [headline, setHeadline] = useState<string>(clampStr(extrasAny?.headline || ''));
