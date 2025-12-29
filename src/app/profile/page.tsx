@@ -109,6 +109,48 @@ export default function ProfilePage() {
 
   
 
+
+
+// --- ROLLBACK SAFE HYDRATION (pristine only) ---
+const hydratedUidRef = useRef<string>('');
+const dirtyRef = useRef<boolean>(false);
+
+const extrasAny: any = extras as any;
+const initialDisplayName = clampStr(snap?.displayName || extrasAny?.displayName || '');
+const initialFullName = clampStr(extrasAny?.fullName || '');
+const initialHeadline = clampStr(extrasAny?.headline || '');
+const initialAbout = clampStr(extrasAny?.about || '');
+const initialSex = clampStr(extrasAny?.sex || '');
+const initialAge = typeof extrasAny?.age === 'number' ? extrasAny.age : (extrasAny?.age ? Number(extrasAny.age) : '');
+const initialZip = clampStr(extrasAny?.zipCode || extrasAny?.zip || '');
+
+// Once per uid: if user hasn't typed yet, sync form fields from stored values.
+useEffect(() => {
+  if (!uid) return;
+  if (dirtyRef.current) return;
+  if (hydratedUidRef.current === uid) return;
+
+  const hasStored =
+    Boolean(initialDisplayName) ||
+    Boolean(initialFullName) ||
+    Boolean(initialHeadline) ||
+    Boolean(initialAbout) ||
+    Boolean(initialSex) ||
+    Boolean(initialAge) ||
+    Boolean(initialZip);
+
+  if (!hasStored) return;
+
+  setDisplayName(initialDisplayName);
+  setFullName(initialFullName);
+  setHeadline(initialHeadline);
+  setAbout(initialAbout);
+  setSex(initialSex);
+  setAge(initialAge as any);
+  setZipCode(initialZip);
+
+  hydratedUidRef.current = uid;
+}, [uid, initialDisplayName, initialFullName, initialHeadline, initialAbout, initialSex, initialAge, initialZip]);
 // Derived initial text fields (from extras/snapshot) used for hydration.
 const initialDisplayName = clampStr((extras as any)?.displayName ?? (snap as any)?.displayName ?? '');
 const initialFullName = clampStr((extras as any)?.fullName ?? (snap as any)?.fullName ?? '');
@@ -117,25 +159,7 @@ const initialAbout = clampStr((extras as any)?.about ?? (extras as any)?.bio ?? 
 const initialZip = clampStr((extras as any)?.zipCode ?? (extras as any)?.zip ?? (extras as any)?.postalCode ?? (snap as any)?.zipCode ?? (snap as any)?.zip ?? (snap as any)?.postalCode ?? '');
 
 // PROFILE_HYDRATE_V1: hydrate controlled inputs after extras/snap load (prevents age/sex/zip from staying default)
-const hydratedRef = React.useRef<string>('');
-
-useEffect(() => {
-  if (!uid) return;
-  if (hydratedRef.current === uid) return;
-
-  // Only hydrate if we have any stored data (avoid clobbering user typing).
-  const hasStored =
-    Boolean(initialDisplayName) ||
-    Boolean(initialFullName) ||
-    Boolean(initialHeadline) ||
-    Boolean(initialAbout) ||
-    Boolean(initialSex) ||
-    Boolean(initialAge) ||
-    Boolean(initialZip) ||
-    Boolean(primaryPhotoUrl) ||
-    (Array.isArray(gallery) && gallery.length > 0);
-
-  if (!hasStored) {
+if (!hasStored) {
     hydratedRef.current = uid;
     return;
   }
@@ -529,11 +553,11 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
           <div style={row}>
             <div>
               <div style={label}>Display name</div>
-              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={input} />
+              <input value={displayName} onChange={(e) => { dirtyRef.current = true; setDisplayName(e.target.value)} style={input} />
             </div>
             <div>
               <div style={label}>Full name</div>
-              <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={input} />
+              <input value={fullName} onChange={(e) => { dirtyRef.current = true; setFullName(e.target.value)} style={input} />
             </div>
           </div>
 
@@ -541,7 +565,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
           <div style={row}>
             <div>
               <div style={label}>Sex</div>
-              <select value={sex} onChange={(e) => setSex(e.target.value)} style={input as any}>
+              <select value={sex} onChange={(e) => { dirtyRef.current = true; setSex(e.target.value)} style={input as any}>
                 <option value="any">Any</option>
                 <option value="female">Female</option>
                 <option value="male">Male</option>
@@ -563,7 +587,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
             </div>
             <div>
               <div style={label}>ZIP code</div>
-              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
+              <input value={zipCode} onChange={(e) => { dirtyRef.current = true; setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
             </div>
           </div>
 
@@ -571,7 +595,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
           <div style={row}>
             <div>
               <div style={label}>Headline</div>
-              <input value={headline} onChange={(e) => setHeadline(e.target.value)} style={input} />
+              <input value={headline} onChange={(e) => { dirtyRef.current = true; setHeadline(e.target.value)} style={input} />
             </div>
             <div>
               <div style={label}>Profile photo URL (auto from selection)</div>
@@ -586,7 +610,7 @@ const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayNam
 
           <div style={{ marginTop: 12 }}>
             <div style={label}>About</div>
-            <textarea value={about} onChange={(e) => setAbout(e.target.value)} style={textarea} />
+            <textarea value={about} onChange={(e) => { dirtyRef.current = true; setAbout(e.target.value)} style={textarea} />
           </div>
         </div>
       </div>
