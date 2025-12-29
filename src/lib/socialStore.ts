@@ -6,7 +6,7 @@
  * This file is intentionally self-contained and defensive to avoid deploy/type issues.
  */
 
-export type Sex = 'any' | 'male' | 'female';
+export type Sex = 'male' | 'female';
 
 export type Geo = { lat: number; lng: number };
 
@@ -174,9 +174,8 @@ function ensureMap<T>(root: Dict<T>, key: string, factory: () => T): T {
 }
 
 function normalizeSex(v: any): Sex {
-  const s = String(v ?? '').toLowerCase().trim();
-  if (s === 'male' || s === 'female' || s === 'any') return s as Sex;
-  return 'any';
+  const s = String(v || '').toLowerCase().trim();
+  return s === 'female' ? 'female' : 'male';
 }
 
 function normalizeGeo(v: any): Geo | null {
@@ -195,10 +194,42 @@ function normalizeGeo(v: any): Geo | null {
  * Token -> UID
  * Current app uses the token as the user identifier (email-like). Keep this forgiving.
  */
-export function uidFromToken(token: string | null | undefined): string | null {
-  const t = (token ?? '').toString().trim();
-  return t ? t : null;
+export function uidFromToken(token: string | null): string | null {
+  if (!token) return null;
+
+  // Firebase ID tokens / JWTs: payload typically contains `user_id` and `sub` (both equal the UID).
+  const payload = decodeJwtPayload(token);
+  const uid = payload?.user_id || payload?.sub || payload?.uid;
+
+  if (typeof uid === 'string' && uid.length > 0 && uid.length < 128) return uid;
+
+  // If it's not a JWT, do NOT fall back to returning the token (that breaks storage keys/UI).
+  return null;
 }
+
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+
+    let jsonStr: string;
+    // Browser
+    if (typeof atob === 'function') {
+      jsonStr = atob(padded);
+    } else {
+      // Node / build
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const buf = require('buffer').Buffer.from(padded, 'base64');
+      jsonStr = buf.toString('utf8');
+    }
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+}
+
 
 // ---- Profile snapshot helpers ----
 
