@@ -107,10 +107,10 @@ function pickPhotoUrl(profile: any): string {
     for (let i = list.length - 1; i >= 0; i--) {
       const item = list[i];
       if (!item) continue;
-      if (typeof item === 'string' && item) return normalizePhotoUrl(item);
+      if (typeof item === 'string' && item) return normalizePhotoUrl(item as string);
       if (typeof item === 'object') {
         const u = item.url || item.src || item.photoUrl || item.imageUrl;
-        if (typeof u === 'string' && u) return normalizePhotoUrl(u);
+        if (typeof u === 'string' && u) return normalizePhotoUrl(u as string);
       }
     }
     return '';
