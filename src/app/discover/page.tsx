@@ -247,6 +247,14 @@ export default function DiscoverPage() {
     }
   }, [myUid]);
 
+  const mySnap = useMemo(() => {
+    try {
+      return loadUserProfileSnapshot(myUid);
+    } catch {
+      return null as any;
+    }
+  }, [myUid]);
+
   const [deviceLoc, setDeviceLoc] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
