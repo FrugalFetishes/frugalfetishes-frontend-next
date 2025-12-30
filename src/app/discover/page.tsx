@@ -96,12 +96,12 @@ function normalizePhotoUrl(p?: string | null): string | null {
   return `/${s.replace(/^\/+/, '')}`;
 }
 
-function pickPhotoUrl(profile: any): string {
+function pickPhotoUrl(profile: any): string | null {
   if (!profile) return '';
 
   // Prefer arrays (photos/images/gallery) because they tend to reflect the most recent uploads.
   // Many backends keep older scalar fields around (profilePhotoUrl/photoUrl/etc), which can become stale.
-  const pickFromList = (list: any): string => {
+  const pickFromList = (list: any): string | null => {
     if (!Array.isArray(list) || list.length === 0) return '';
     // Prefer the most-recent entry (last), falling back to earlier ones if needed.
     for (let i = list.length - 1; i >= 0; i--) {
@@ -427,7 +427,7 @@ export default function DiscoverPage() {
         name: p.name,
         age: p.age,
         zipCode: (p as any).zipCode || (p as any).zip || undefined,
-        photoUrl: pickPhotoUrl(p),
+        photoUrl: pickPhotoUrl(p) || undefined,
         matchedAt: Date.now(),
       });
       saveLS(MATCHES_KEY, list);
