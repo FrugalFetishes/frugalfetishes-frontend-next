@@ -34,6 +34,22 @@ async function postJson(path: string, token: string | null, payload: any) {
 }
 
 
+async function getJson(path: string, token: string | null) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'GET',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`GET ${path} failed: ${res.status} ${t}`);
+  }
+  return res.json().catch(() => ({}));
+}
+
+
 function clampStr(v: any): string {
   if (typeof v === 'string') return v;
   if (v == null) return '';
@@ -140,6 +156,85 @@ export default function ProfilePage() {
   const [newUrl, setNewUrl] = useState<string>('');
   const [status, setStatus] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+
+  // One-time backend hydration: ensures ALL accounts (Jess/Rebecca etc.) load the same saved values
+  // even if localStorage buckets were previously mismatched.
+  const backendHydratedRef = useRef<string>('');
+  useEffect(() => {
+    if (!token || !uid || uid === 'anon') return;
+    if (backendHydratedRef.current === uid) return;
+    backendHydratedRef.current = uid;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const j: any = await getJson('/api/profile/me', token);
+        if (cancelled) return;
+        const src: any = (j && (j.profile || j.user)) || {};
+
+        const nextDisplayName = clampStr(src.displayName || '');
+        const nextFullName = clampStr(src.fullName || '');
+        const nextHeadline = clampStr(src.headline || '');
+        const nextAbout = clampStr(src.about || src.bio || '');
+        const nextSex = clampStr(src.sex || '');
+        const nextZip = clampStr(src.zipCode || src.zip || '');
+        const nextAge = typeof src.age === 'number' ? src.age : null;
+
+        const nextPrimary = normalizePhotoUrl(clampStr(src.photoUrl || ''));
+        const nextPhotos = Array.isArray(src.photos) ? src.photos.map((x: any) => clampStr(x)).filter(Boolean) : [];
+        const mergedGallery = Array.from(new Set([nextPrimary, ...nextPhotos, ...gallery].filter(Boolean))).slice(0, 9);
+
+        // Only set state if backend has something meaningful (avoid clobbering user typing).
+        if (nextDisplayName && !displayName) setDisplayName(nextDisplayName);
+        if (nextFullName && !fullName) setFullName(nextFullName);
+        if (nextHeadline && !headline) setHeadline(nextHeadline);
+        if (nextAbout && !about) setAbout(nextAbout);
+        if (nextSex && (!sex || sex === 'any')) setSex(nextSex);
+        if (nextZip && !zipCode) setZipCode(nextZip);
+        if (typeof nextAge === 'number' && (!age || age < 18)) setAge(nextAge);
+
+        if (nextPrimary && !primaryPhotoUrl) setPrimaryPhotoUrl(nextPrimary);
+        if (mergedGallery.length && mergedGallery.join('|') != gallery.join('|')) setGallery(mergedGallery);
+
+        // Update local store so future refreshes are consistent.
+        if (nextDisplayName || nextHeadline || nextAbout || nextZip || nextPrimary || nextPhotos.length) {
+          upsertUserProfileSnapshot(uid, {
+            id: uid,
+            displayName: nextDisplayName || displayName || uid,
+            fullName: nextFullName || fullName || '',
+            email: '',
+            photoUrl: nextPrimary || primaryPhotoUrl || '',
+            updatedAt: Date.now(),
+            sex: nextSex || sex || 'any',
+            age: typeof nextAge === 'number' ? nextAge : Number(age) || 0,
+            zipCode: nextZip || zipCode || '',
+            location: (src.location && typeof src.location === 'object') ? src.location : initialLocation || null,
+          } as any);
+
+          setProfileExtras(uid, {
+            ...(getProfileExtras(uid) as any),
+            displayName: nextDisplayName || displayName || uid,
+            fullName: nextFullName || fullName || '',
+            headline: nextHeadline || headline || '',
+            bio: nextAbout || about || '',
+            sex: nextSex || sex || 'any',
+            age: typeof nextAge === 'number' ? nextAge : Number(age) || 0,
+            zipCode: nextZip || zipCode || '',
+            primaryPhotoUrl: nextPrimary || primaryPhotoUrl || '',
+            gallery: mergedGallery,
+          } as any);
+        }
+      } catch (e) {
+        // silent (offline / auth issues). Profile still works from local data.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, uid]);
 
   useEffect(() => {
     // Keep primary in sync and always visible.
