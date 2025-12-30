@@ -224,7 +224,29 @@ export default function ProfilePage() {
         gallery: gallery,
       } as any));
 
-      toast('Saved!');
+          // Also persist to backend so /api/feed and expanded profile can show these fields
+    try {
+      await apiPost('/api/profile/update', {
+        displayName,
+        fullName,
+        headline,
+        about,
+        sex,
+        age,
+        zipCode,
+        photos,
+        photoUrl: primaryPhotoUrl,
+        interests,
+        city,
+        location,
+        isActive: true,
+      });
+    } catch (e) {
+      // Non-fatal: local save already succeeded
+      console.warn('profile/update failed', e);
+    }
+
+toast('Saved!');
     } catch (e: any) {
       toast('Save failed');
       console.error(e);
