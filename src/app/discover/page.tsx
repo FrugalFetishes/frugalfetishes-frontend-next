@@ -96,27 +96,47 @@ function normalizePhotoUrl(p?: string | null): string | null {
   return `/${s.replace(/^\/+/, '')}`;
 }
 
-function pickPhotoUrl(profile: any): string | null {
-  const direct =
-    profile?.profilePhotoUrl ||
-    profile?.primaryPhotoUrl ||
-    profile?.mainPhotoUrl ||
-    profile?.photoUrl ||
-    profile?.imageUrl ||
-    profile?.avatarUrl;
+function pickPhotoUrl(profile: any): string {
+  if (!profile) return '';
 
-  const directNorm = normalizePhotoUrl(direct);
-  if (directNorm) return directNorm;
+  // Prefer arrays (photos/images/gallery) because they tend to reflect the most recent uploads.
+  // Many backends keep older scalar fields around (profilePhotoUrl/photoUrl/etc), which can become stale.
+  const pickFromList = (list: any): string => {
+    if (!Array.isArray(list) || list.length === 0) return '';
+    // Prefer the most-recent entry (last), falling back to earlier ones if needed.
+    for (let i = list.length - 1; i >= 0; i--) {
+      const item = list[i];
+      if (!item) continue;
+      if (typeof item === 'string') return normalizePhotoUrl(item);
+      if (typeof item === 'object') {
+        const u = item.url || item.src || item.photoUrl || item.imageUrl;
+        if (typeof u === 'string' && u) return normalizePhotoUrl(u);
+      }
+    }
+    return '';
+  };
 
-  const arrCandidates: any[] = [];
-  for (const key of ['images', 'photos', 'gallery']) {
-    if (Array.isArray(profile?.[key])) arrCandidates.push(...profile[key]);
-  }
-  for (const item of arrCandidates) {
-    const u = normalizePhotoUrl(item?.url || item?.src || item?.href || item);
-    if (u) return u;
-  }
-  return null;
+  const fromPhotos = pickFromList(profile.photos);
+  if (fromPhotos) return fromPhotos;
+
+  const fromImages = pickFromList(profile.images);
+  if (fromImages) return fromImages;
+
+  const fromGallery = pickFromList(profile.gallery);
+  if (fromGallery) return fromGallery;
+
+  // Scalar fallbacks (often stale, so only use if arrays are empty)
+  return (
+    normalizePhotoUrl(
+      profile.profilePhotoUrl ||
+        profile.primaryPhotoUrl ||
+        profile.mainPhotoUrl ||
+        profile.photoUrl ||
+        profile.imageUrl ||
+        profile.avatarUrl ||
+        ''
+    ) || ''
+  );
 }
 
 function placeholderAvatarDataUri(name: string) {
