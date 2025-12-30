@@ -231,9 +231,111 @@ function decodeJwtPayload(token: string): any | null {
 }
 
 
+
+// ---- UID migration helpers ----
+// During earlier broken deployments, we accidentally used the *raw session token* (starts with "eyJ...")
+// as the uid key in localStorage. After fixing uidFromToken(), existing saved data may live under that
+// legacy key. The helpers below safely migrate the legacy bucket -> real uid ONCE.
+function looksLikeJwtKey(k: string): boolean {
+  if (!k) return false;
+  if (k.startsWith('eyJ') && k.length > 80) return true;
+  const dotCount = (k.match(/\./g) || []).length;
+  return dotCount >= 2 && k.length > 120;
+}
+
+function getPinnedUid(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return (
+      window.localStorage.getItem('ff_uid_pinned_v1') ||
+      window.localStorage.getItem('ff_uid_pinned') ||
+      window.localStorage.getItem('uid_pinned') ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function maybeMigrateLegacyUidBuckets(realUid: string): void {
+  if (typeof window === 'undefined') return;
+  if (!realUid) return;
+
+  const migratedFlag = `ff_uid_migrated_to_v1:${realUid}`;
+  try {
+    if (window.localStorage.getItem(migratedFlag) === '1') return;
+  } catch {}
+
+  const s = load();
+
+  const hasReal =
+    Boolean((s.profilesByUid as any)?.[realUid]) ||
+    Boolean((s.extrasByUid as any)?.[realUid]) ||
+    Boolean((s.likesByUser as any)?.[realUid]) ||
+    Boolean((s.matchesByUser as any)?.[realUid]) ||
+    Boolean((s.clickedMatchesByUser as any)?.[realUid]) ||
+    Boolean((s.unreadByUser as any)?.[realUid]);
+
+  if (hasReal) {
+    try { window.localStorage.setItem(migratedFlag, '1'); } catch {}
+    return;
+  }
+
+  // 1) Prefer an explicit pinned uid if it exists in storage.
+  const pinned = getPinnedUid();
+  const candidates: string[] = [];
+  if (pinned) candidates.push(pinned);
+
+  // 2) If there's exactly one profile bucket key, that's almost certainly the legacy uid.
+  const profileKeys = Object.keys((s.profilesByUid as any) || {});
+  if (profileKeys.length === 1) candidates.push(profileKeys[0]);
+
+  // 3) Otherwise, look for a single JWT-like key.
+  const jwtKeys = profileKeys.filter(looksLikeJwtKey);
+  if (jwtKeys.length === 1) candidates.push(jwtKeys[0]);
+
+  const from = candidates.find((k) => k && k !== realUid && (
+    Boolean((s.profilesByUid as any)?.[k]) ||
+    Boolean((s.extrasByUid as any)?.[k]) ||
+    Boolean((s.likesByUser as any)?.[k]) ||
+    Boolean((s.matchesByUser as any)?.[k]) ||
+    Boolean((s.clickedMatchesByUser as any)?.[k]) ||
+    Boolean((s.unreadByUser as any)?.[k])
+  )) || null;
+
+  if (!from) {
+    try { window.localStorage.setItem(migratedFlag, '1'); } catch {}
+    return;
+  }
+
+  let changed = false;
+  const moveMap = (mapKey: keyof StoreState) => {
+    const m: any = (s as any)[mapKey] || {};
+    if (m && m[from] != null && m[realUid] == null) {
+      m[realUid] = m[from];
+      changed = true;
+    }
+    // Keep legacy key for safety; do NOT delete.
+    (s as any)[mapKey] = m;
+  };
+
+  moveMap('profilesByUid');
+  moveMap('extrasByUid');
+  moveMap('likesByUser');
+  moveMap('matchesByUser');
+  moveMap('clickedMatchesByUser');
+  moveMap('unreadByUser');
+
+  if (changed) save(s);
+
+  try { window.localStorage.setItem(migratedFlag, '1'); } catch {}
+}
+
 // ---- Profile snapshot helpers ----
 
 export function loadUserProfileSnapshot(uid: string): ProfileSnapshot | null {
+  maybeMigrateLegacyUidBuckets(uid);
+
   const s = load();
   const snapAny: any = (s.profilesByUid && (s.profilesByUid as any)[uid]) || null;
   if (!snapAny) return null;
@@ -295,6 +397,8 @@ export function upsertUserProfileSnapshot(uid: string, patch: Partial<ProfileSna
 }
 
 export function getProfileExtras(uid: string): ProfileExtras {
+  maybeMigrateLegacyUidBuckets(uid);
+
   const s = load();
   const extrasAny: any = (s.extrasByUid && (s.extrasByUid as any)[uid]) || {};
   const snapAny: any = (s.profilesByUid && (s.profilesByUid as any)[uid]) || {};
