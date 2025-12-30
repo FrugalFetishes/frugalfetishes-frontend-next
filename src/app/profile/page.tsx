@@ -188,7 +188,7 @@ export default function ProfilePage() {
     }
   }
 
-  function save() {
+  async function save() {
     try {
       const cleanZip = zipCode.trim();
 
