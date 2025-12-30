@@ -7,7 +7,7 @@ import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
 
 
-import { uidFromToken, likeUser, getProfileExtras, loadUserProfileSnapshot } from '@/lib/socialStore';
+import { uidFromToken, likeUser, getProfileExtras } from '@/lib/socialStore';
 type Profile = {
   id: string;
   name: string;
@@ -48,6 +48,45 @@ function safeString(v: any, fallback: string = ''): string {
   } catch {
     return fallback;
   }
+}
+
+
+function normalizeLoc(v: any): { lat: number; lng: number } | null {
+  try {
+    if (!v) return null;
+
+    const toNum = (x: any): number | null => {
+      if (typeof x === 'number' && Number.isFinite(x)) return x;
+      if (typeof x === 'string') {
+        const t = x.trim();
+        if (!t) return null;
+        const n = Number(t);
+        if (Number.isFinite(n)) return n;
+        const f = parseFloat(t);
+        if (Number.isFinite(f)) return f;
+      }
+      return null;
+    };
+
+    // Firestore GeoPoint-like (web SDK often exposes latitude/longitude; admin may expose _latitude/_longitude)
+    const lat1 = toNum(v.lat ?? v.latitude ?? v._latitude ?? v._lat ?? v?.geopoint?.latitude ?? v?.geopoint?._latitude);
+    const lng1 = toNum(v.lng ?? v.lon ?? v.long ?? v.longitude ?? v._longitude ?? v._lng ?? v?.geopoint?.longitude ?? v?.geopoint?._longitude);
+
+    if (lat1 !== null && lng1 !== null) return { lat: lat1, lng: lng1 };
+
+    // Some objects store it as { latitude: { _latitude }, longitude: { _longitude } } etc.
+    const lat2 = toNum(v.latitude?.latitude ?? v.latitude?._latitude ?? v.latitude?.lat);
+    const lng2 = toNum(v.longitude?.longitude ?? v.longitude?._longitude ?? v.longitude?.lng);
+    if (lat2 !== null && lng2 !== null) return { lat: lat2, lng: lng2 };
+
+    // Arrays like [lat,lng]
+    if (Array.isArray(v) && v.length >= 2) {
+      const a0 = toNum(v[0]);
+      const a1 = toNum(v[1]);
+      if (a0 !== null && a1 !== null) return { lat: a0, lng: a1 };
+    }
+  } catch (e) {}
+  return null;
 }
 
 function distanceMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -97,111 +136,24 @@ function normalizePhotoUrl(p?: string | null): string | null {
 }
 
 function pickPhotoUrl(profile: any): string | null {
-  if (!profile) return '';
+  const direct =
+    profile?.profilePhotoUrl ||
+    profile?.primaryPhotoUrl ||
+    profile?.mainPhotoUrl ||
+    profile?.photoUrl ||
+    profile?.imageUrl ||
+    profile?.avatarUrl;
 
-  // Prefer arrays (photos/images/gallery) because they tend to reflect the most recent uploads.
-  // Many backends keep older scalar fields around (profilePhotoUrl/photoUrl/etc), which can become stale.
-  const pickFromList = (list: any): string | null => {
-    if (!Array.isArray(list) || list.length === 0) return '';
-    // Prefer the most-recent entry (last), falling back to earlier ones if needed.
-    for (let i = list.length - 1; i >= 0; i--) {
-      const item = list[i];
-      if (!item) continue;
-      if (typeof item === 'string' && item) return normalizePhotoUrl(item as string);
-      if (typeof item === 'object') {
-        const u = item.url || item.src || item.photoUrl || item.imageUrl;
-        if (typeof u === 'string' && u) return normalizePhotoUrl(u as string);
-      }
-    }
-    return '';
-  };
+  const directNorm = normalizePhotoUrl(direct);
+  if (directNorm) return directNorm;
 
-  const fromPhotos = pickFromList(profile.photos);
-  if (fromPhotos) return fromPhotos;
-
-  const fromImages = pickFromList(profile.images);
-  if (fromImages) return fromImages;
-
-  const fromGallery = pickFromList(profile.gallery);
-  if (fromGallery) return fromGallery;
-
-  // Scalar fallbacks (often stale, so only use if arrays are empty)
-  return (
-    normalizePhotoUrl(
-      profile.profilePhotoUrl ||
-        profile.primaryPhotoUrl ||
-        profile.mainPhotoUrl ||
-        profile.photoUrl ||
-        profile.imageUrl ||
-        profile.avatarUrl ||
-        ''
-    ) || ''
-  );
-}
-
-function collectPhotoUrls(profile: any): string[] {
-  const out: string[] = [];
-  const push = (u: any) => {
-    if (typeof u !== 'string') return;
-    const nu = normalizePhotoUrl(u);
-    if (!nu) return;
-    if (!out.includes(nu)) out.push(nu);
-  };
-
-  if (!profile) return out;
-
-  // Common buckets
-  const buckets: any[] = [
-    profile.photos,
-    profile.images,
-    profile.gallery,
-    profile.photoUrls,
-    profile.photoURLs,
-    profile.designImages,
-  ];
-
-  for (const b of buckets) {
-    if (Array.isArray(b)) {
-      for (const item of b) {
-        if (typeof item === 'string') push(item);
-        else if (item && typeof item === 'object') {
-          const u = item.url || item.src || item.photoUrl || item.imageUrl;
-          push(u);
-        }
-      }
-    }
+  const arrCandidates: any[] = [];
+  for (const key of ['images', 'photos', 'gallery']) {
+    if (Array.isArray(profile?.[key])) arrCandidates.push(...profile[key]);
   }
-
-  // Singletons (best-effort)
-  push(profile.primaryPhotoUrl);
-  push(profile.primaryPhoto);
-  push(profile.profilePhotoUrl);
-  push(profile.profilePhoto);
-  push(profile.avatarUrl);
-  push(profile.avatar);
-  push(profile.photoUrl);
-  push(profile.imageUrl);
-  push(profile.image);
-
-  return out;
-}
-
-function getStr(p: any, ...keys: string[]): string {
-  for (const k of keys) {
-    const v = p?.[k];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return '';
-}
-
-function getNum(p: any, ...keys: string[]): number | null {
-  for (const k of keys) {
-    const v = p?.[k];
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (typeof v === 'string') {
-      const n = Number(v);
-      if (Number.isFinite(n)) return n;
-    }
+  for (const item of arrCandidates) {
+    const u = normalizePhotoUrl(item?.url || item?.src || item?.href || item);
+    if (u) return u;
   }
   return null;
 }
@@ -247,14 +199,6 @@ export default function DiscoverPage() {
     }
   }, [myUid]);
 
-  const mySnap = useMemo(() => {
-    try {
-      return loadUserProfileSnapshot(myUid);
-    } catch {
-      return null as any;
-    }
-  }, [myUid]);
-
   const [deviceLoc, setDeviceLoc] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
@@ -284,14 +228,13 @@ export default function DiscoverPage() {
     } catch {}
   }, []);
 
-  const myLoc = (deviceLoc || (mySnap as any)?.location || (myExtras as any)?.location || null) as { lat: number; lng: number } | null;
-  const myZip = useMemo(() => safeString((myExtras as any)?.zipCode || (myExtras as any)?.zip || (mySnap as any)?.zipCode || (mySnap as any)?.zip || ''), [myExtras, mySnap]);
+  const myLoc = normalizeLoc(deviceLoc) || normalizeLoc((myExtras as any)?.location);
+  const myZip = useMemo(() => safeString((myExtras as any)?.zipCode || (myExtras as any)?.zip || ''), [myExtras]);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<string>('');
   const [expanded, setExpanded] = useState(false);
-  const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
   const [swipeLabel, setSwipeLabel] = useState<SwipeLabel>(null);
   const [busy, setBusy] = useState(false);
   const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
@@ -311,105 +254,6 @@ export default function DiscoverPage() {
       return 'User';
     }
   }, [current]);
-const expandedDetails = useMemo(() => {
-    if (!current) return null;
-
-    const pid = safeString((current as any).id || (current as any).uid || (current as any)._id || '');
-    const localSnapAny: any = pid ? loadUserProfileSnapshot(pid) : null;
-    const localExtrasAny: any = pid ? getProfileExtras(pid) : null;
-
-    // Merge fields with priority: localSnap/localExtras (recent edits) -> feed payload (from Firestore/API)
-    const displayName = safeString(
-      localSnapAny?.displayName ||
-        localExtrasAny?.displayName ||
-        (current as any).displayName ||
-        (current as any).name ||
-        ''
-    );
-
-    const fullName = safeString(localExtrasAny?.fullName || (current as any).fullName || '');
-
-        const headline = safeString(
-      getStr(localSnapAny, 'headline', 'headlineText', 'tagline', 'intro', 'introduction', 'bio') ||
-        getStr(localExtrasAny, 'headline', 'headlineText', 'tagline', 'intro', 'introduction', 'bio') ||
-        getStr(current as any, 'headline', 'headlineText', 'tagline', 'intro', 'introduction', 'bio') ||
-        ''
-    );
-
-        const about = safeString(
-      getStr(localSnapAny, 'about', 'aboutText', 'bio', 'introduction', 'intro') ||
-        getStr(localExtrasAny, 'about', 'aboutText', 'bio', 'introduction', 'intro') ||
-        getStr(current as any, 'about', 'aboutText', 'bio', 'introduction', 'intro') ||
-        ''
-    );
-
-    const sex = safeString(
-      localSnapAny?.sex ||
-        localExtrasAny?.sex ||
-        (current as any).sex ||
-        (current as any).gender ||
-        (current as any).genderIdentity ||
-        ''
-    );
-
-    const ageRaw = localSnapAny?.age ?? localExtrasAny?.age ?? (current as any).age;
-    const age = typeof ageRaw === 'number' ? ageRaw : ageRaw != null ? Number(ageRaw) : null;
-
-    const zip = safeString(
-      localSnapAny?.zipCode ||
-        localExtrasAny?.zipCode ||
-        (current as any).zipCode ||
-        (current as any).zip ||
-        (current as any).zipcode ||
-        (current as any).postalCode ||
-        (current as any).postcode ||
-        ''
-    );
-
-    const city = safeString((current as any).city || '');
-
-    // Interests could be string[] or comma-separated string
-    let interests: string[] = [];
-    const rawInterests = (current as any).interests;
-    if (Array.isArray(rawInterests)) interests = rawInterests.map((x: any) => safeString(x)).filter(Boolean);
-    else if (typeof rawInterests === 'string')
-      interests = rawInterests.split(',').map((s: string) => safeString(s)).filter(Boolean);
-
-        // Photos: merge localSnap (recent edits) + feed payload; always include the card photo too.
-    const cardPhoto = safeString(pickPhotoUrl(current));
-    const photos = collectPhotoUrls(localSnapAny || current);
-    if (cardPhoto && !photos.includes(cardPhoto)) photos.unshift(cardPhoto);
-
-    const primary = safeString(
-      localSnapAny?.primaryPhotoUrl || (current as any).primaryPhotoUrl || cardPhoto || photos[0] || ''
-    );
-
-    return {
-      photos,
-      primary,
-      displayName,
-      fullName,
-      headline,
-      about,
-      sex,
-      age: Number.isFinite(age as number) ? (age as number) : null,
-      zip,
-      city,
-      interests,
-    };
-  }, [current]);
-
-
-
-  const expandedPhotoUrls = useMemo(() => {
-    try {
-      if (!expanded) return [] as string[];
-      return collectPhotoUrls({ ...(current as any), ...(expandedDetails as any) });
-    } catch {
-      return [] as string[];
-    }
-  }, [expanded, current, expandedDetails]);
-
 
 
   const currentAge = useMemo(() => {
@@ -436,16 +280,18 @@ const expandedDetails = useMemo(() => {
       const curId = (current as any)?.id;
       if (!curId) return null;
       const ex: any = getProfileExtras(curId);
-      const loc = ex?.location;
-      if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') return { lat: loc.lat, lng: loc.lng };
+      const loc = normalizeLoc(ex?.location);
+      if (loc) return loc;
       const curAny: any = current as any;
-      const loc2 = curAny?.location;
-      if (loc2 && typeof loc2.lat === 'number' && typeof loc2.lng === 'number') return { lat: loc2.lat, lng: loc2.lng };
+      const loc2 = normalizeLoc(curAny?.location);
+      if (loc2) return loc2;
       return null;
     } catch {
       return null;
     }
-  }, [current]);const distanceMi = useMemo(() => {
+  }, [current]);
+
+  const distanceMi = useMemo(() => {
     try {
       if (myLoc && currentLoc) {
         const d = distanceMiles(myLoc, currentLoc);
@@ -454,6 +300,17 @@ const expandedDetails = useMemo(() => {
     } catch {}
     return null as number | null;
   }, [myLoc, currentLoc]);
+
+
+  const currentAbout = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      return safeString(anyCur?.about || anyCur?.bio || anyCur?.headline || anyCur?.description || '');
+    } catch {
+      return '';
+    }
+  }, [current]);
+
 
 
   const pillBtn: React.CSSProperties = {
@@ -589,7 +446,7 @@ const expandedDetails = useMemo(() => {
         name: p.name,
         age: p.age,
         zipCode: (p as any).zipCode || (p as any).zip || undefined,
-        photoUrl: pickPhotoUrl(p) || undefined,
+        photoUrl: pickPhotoUrl(p),
         matchedAt: Date.now(),
       });
       saveLS(MATCHES_KEY, list);
@@ -896,7 +753,7 @@ const expandedDetails = useMemo(() => {
                   <span style={{ opacity: 0.9 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
-                  {expandedDetails?.about || expandedDetails?.headline || 'Swipe left/right, or swipe up to view profile.'}
+                  {currentAbout ? currentAbout : 'Swipe left/right, or swipe up to view profile.'}
                 </div>
               </div>
 
@@ -953,8 +810,8 @@ const expandedDetails = useMemo(() => {
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ fontSize: 22, fontWeight: 900 }}>
-                {expandedDetails?.displayName || currentName}
-                {typeof expandedDetails?.age === 'number' ? `, ${expandedDetails?.age}` : typeof currentAge === 'number' ? `, ${currentAge}` : ''}
+                {currentName}
+                {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
               </div>
               <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
                 ↓ Back
@@ -963,57 +820,15 @@ const expandedDetails = useMemo(() => {
 
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Headline</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{safeString((expandedDetails as any)?.headline || (current as any)?.headline || (current as any)?.tagline || '') || '—'}</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{safeString((expandedDetails as any)?.about || (current as any)?.about || (current as any)?.bio || '') || '—'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{currentAbout || 'No bio yet.'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
-                <div style={{ opacity: 0.92 }}>{expandedDetails?.zip || expandedDetails?.city || currentZip || '—'}</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Distance</div>
-                <div style={{ opacity: 0.92 }}>{distanceMi != null ? `${distanceMi} mi` : '—'}</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Sex</div>
-                <div style={{ opacity: 0.92 }}>{expandedDetails?.sex || '—'}</div>
+                <div style={{ opacity: 0.92 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</div>
               </div>
             </div>
-
-            {expandedPhotoUrls.length > 0 && (
-              <div style={{ display: 'grid', gap: 8, marginTop: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Photos</div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {expandedDetails?.photos.slice(0, 12).map((u) => (
-                    <button
-                      key={u}
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); setPhotoModalUrl(u); }} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
-                      style={{
-                        width: 70,
-                        height: 70,
-                        borderRadius: 12,
-                        border: '1px solid rgba(255,255,255,0.12)',
-                        background: 'rgba(0,0,0,0.2)',
-                        padding: 0,
-                        overflow: 'hidden',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <img src={u} alt="photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
               <button type="button" style={{ ...pillBtn, background: 'rgba(255, 98, 118, 0.12)' }} onClick={() => decide('pass')}>
@@ -1028,57 +843,6 @@ const expandedDetails = useMemo(() => {
           <div style={{ opacity: 0.85 }}>No profile selected.</div>
         )}
       </div>
-
-      {photoModalUrl && (
-        <div
-          onClick={() => setPhotoModalUrl(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.75)',
-            zIndex: 50,
-            display: 'grid',
-            placeItems: 'center',
-            padding: 24,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'relative',
-              width: 'min(920px, 92vw)',
-              height: 'min(720px, 80vh)',
-              borderRadius: 18,
-              overflow: 'hidden',
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(0,0,0,0.25)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setPhotoModalUrl(null)}
-              style={{
-                position: 'absolute',
-                top: 10,
-                right: 10,
-                zIndex: 2,
-                width: 38,
-                height: 38,
-                borderRadius: 999,
-                border: '1px solid rgba(255,255,255,0.18)',
-                background: 'rgba(0,0,0,0.35)',
-                color: 'rgba(255,255,255,0.92)',
-                cursor: 'pointer',
-                fontSize: 18,
-                lineHeight: '38px',
-              }}
-            >
-              ✕
-            </button>
-            <img src={photoModalUrl} alt="full" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
