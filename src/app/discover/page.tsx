@@ -7,7 +7,7 @@ import { apiGet, apiPost } from '@/lib/api';
 import { requireSession, clearSession } from '@/lib/session';
 
 
-import { uidFromToken, likeUser, getProfileExtras } from '@/lib/socialStore';
+import { uidFromToken, likeUser, getProfileExtras, loadUserProfileSnapshot } from '@/lib/socialStore';
 type Profile = {
   id: string;
   name: string;
@@ -341,26 +341,79 @@ export default function DiscoverPage() {
   }, [current]);
 
   const expandedDetails = useMemo(() => {
-    const p: any = (current as any) || {};
+    if (!current) return null;
 
-    const photos = collectPhotoUrls(p);
-    const primary = pickPhotoUrl(p) || photos[0] || null;
+    const pid = safeString((current as any).id || (current as any).uid || (current as any)._id || '');
+    const localSnapAny: any = pid ? loadUserProfileSnapshot(pid) : null;
+    const localExtrasAny: any = pid ? getProfileExtras(pid) : null;
 
-    const displayName = safeString(p.displayName || p.name || p.display || '');
-    const fullName = safeString(p.fullName || p.realName || '');
-    const headline = safeString(p.headline || p.tagline || p.title || '');
-    const about = safeString(p.about || p.bio || p.description || '');
+    // Merge fields with priority: localSnap/localExtras (recent edits) -> feed payload (from Firestore/API)
+    const displayName = safeString(
+      localSnapAny?.displayName ||
+        localExtrasAny?.displayName ||
+        (current as any).displayName ||
+        (current as any).name ||
+        ''
+    );
 
-    const sex = safeString(p.sex || p.gender || '');
-    const age = typeof p.age === 'number' ? p.age : typeof p.age === 'string' ? Number(p.age) : null;
-    const zip = safeString(p.zipCode || p.zip || p.zipcode || p.postalCode || p.postal || '');
-    const city = safeString(p.city || '');
+    const fullName = safeString(localExtrasAny?.fullName || (current as any).fullName || '');
 
-    // interests could be string[] or comma-separated string
+    const headline = safeString(
+      localSnapAny?.headline ||
+        localExtrasAny?.headline ||
+        (current as any).headline ||
+        (current as any).tagline ||
+        (current as any).intro ||
+        (current as any).introduction ||
+        (current as any).bio ||
+        ''
+    );
+
+    const about = safeString(
+      localSnapAny?.about ||
+        localExtrasAny?.about ||
+        (current as any).about ||
+        (current as any).bio ||
+        (current as any).introduction ||
+        (current as any).intro ||
+        ''
+    );
+
+    const sex = safeString(
+      localSnapAny?.sex ||
+        localExtrasAny?.sex ||
+        (current as any).sex ||
+        (current as any).gender ||
+        (current as any).genderIdentity ||
+        ''
+    );
+
+    const ageRaw = localSnapAny?.age ?? localExtrasAny?.age ?? (current as any).age;
+    const age = typeof ageRaw === 'number' ? ageRaw : ageRaw != null ? Number(ageRaw) : null;
+
+    const zip = safeString(
+      localSnapAny?.zipCode ||
+        localExtrasAny?.zipCode ||
+        (current as any).zipCode ||
+        (current as any).zip ||
+        (current as any).zipcode ||
+        (current as any).postalCode ||
+        (current as any).postcode ||
+        ''
+    );
+
+    const city = safeString((current as any).city || '');
+
+    // Interests could be string[] or comma-separated string
     let interests: string[] = [];
-    const rawInterests = p.interests;
+    const rawInterests = (current as any).interests;
     if (Array.isArray(rawInterests)) interests = rawInterests.map((x: any) => safeString(x)).filter(Boolean);
-    else if (typeof rawInterests === 'string') interests = rawInterests.split(',').map((s: string) => safeString(s)).filter(Boolean);
+    else if (typeof rawInterests === 'string')
+      interests = rawInterests.split(',').map((s: string) => safeString(s)).filter(Boolean);
+
+    // Photos: prefer localSnap gallery (recent edits), but fall back to feed payload
+    const photos = collectPhotoUrls(localSnapAny || current);
+    const primary = safeString(localSnapAny?.primaryPhotoUrl || (current as any).primaryPhotoUrl || photos[0] || '');
 
     return {
       photos,
@@ -375,7 +428,7 @@ export default function DiscoverPage() {
       city,
       interests,
     };
-  }, [current]);
+  }, [current, uid]);}, [current]);
 
   const distanceMi = useMemo(() => {
     try {
