@@ -959,7 +959,7 @@ export default function DiscoverPage() {
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
-                <div style={{ opacity: 0.92 }}>{expandedDetails?.zip || expandedDetails.city || currentZip || '—'}</div>
+                <div style={{ opacity: 0.92 }}>{expandedDetails?.zip || expandedDetails?.city || currentZip || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
