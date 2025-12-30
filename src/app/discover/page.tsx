@@ -939,7 +939,7 @@ export default function DiscoverPage() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ fontSize: 22, fontWeight: 900 }}>
                 {expandedDetails?.displayName || currentName}
-                {typeof expandedDetails.age === 'number' ? `, ${expandedDetails?.age}` : typeof currentAge === 'number' ? `, ${currentAge}` : ''}
+                {typeof expandedDetails?.age === 'number' ? `, ${expandedDetails?.age}` : typeof currentAge === 'number' ? `, ${currentAge}` : ''}
               </div>
               <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
                 ↓ Back
