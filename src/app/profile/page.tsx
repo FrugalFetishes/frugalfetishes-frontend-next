@@ -259,9 +259,6 @@ export default function ProfilePage() {
         zipCode,
         photos: [primaryPhotoUrl, ...gallery].filter(Boolean),
         photoUrl: primaryPhotoUrl,
-        interests,
-        city,
-        location,
         isActive: true,
       });
     } catch (e) {
