@@ -973,7 +973,7 @@ export default function DiscoverPage() {
               </div>
             </div>
 
-            {expandedDetails?.photos.length > 0 && (
+            {(expandedDetails?.photos?.length || 0) > 0 && (
               <div style={{ display: 'grid', gap: 8, marginTop: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Photos</div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
