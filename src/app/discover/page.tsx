@@ -276,8 +276,8 @@ export default function DiscoverPage() {
     } catch {}
   }, []);
 
-  const myLoc = (deviceLoc || (myExtras as any)?.location || null) as { lat: number; lng: number } | null;
-  const myZip = useMemo(() => safeString((myExtras as any)?.zipCode || (myExtras as any)?.zip || ''), [myExtras]);
+  const myLoc = (deviceLoc || (mySnap as any)?.location || (myExtras as any)?.location || null) as { lat: number; lng: number } | null;
+  const myZip = useMemo(() => safeString((myExtras as any)?.zipCode || (myExtras as any)?.zip || (mySnap as any)?.zipCode || (mySnap as any)?.zip || ''), [myExtras, mySnap]);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [idx, setIdx] = useState(0);
@@ -303,6 +303,16 @@ export default function DiscoverPage() {
       return 'User';
     }
   }, [current]);
+
+  const expandedPhotoUrls = useMemo(() => {
+    try {
+      if (!expanded) return [] as string[];
+      return collectPhotoUrls({ ...(current as any), ...(expandedDetails as any) });
+    } catch {
+      return [] as string[];
+    }
+  }, [expanded, current, expandedDetails]);
+
 
 
   const currentAge = useMemo(() => {
@@ -947,12 +957,12 @@ export default function DiscoverPage() {
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Headline</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails?.headline || '—'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{safeString((expandedDetails as any)?.headline || (current as any)?.headline || (current as any)?.tagline || '') || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails?.about || '—'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{safeString((expandedDetails as any)?.about || (current as any)?.about || (current as any)?.bio || '') || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
@@ -971,7 +981,7 @@ export default function DiscoverPage() {
               </div>
             </div>
 
-            {(expandedDetails?.photos?.length || 0) > 0 && (
+            {expandedPhotoUrls.length > 0 && (
               <div style={{ display: 'grid', gap: 8, marginTop: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Photos</div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
