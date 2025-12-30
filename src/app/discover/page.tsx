@@ -139,6 +139,73 @@ function pickPhotoUrl(profile: any): string | null {
   );
 }
 
+function collectPhotoUrls(profile: any): string[] {
+  const out: string[] = [];
+  const push = (u: any) => {
+    if (typeof u !== 'string') return;
+    const nu = normalizePhotoUrl(u);
+    if (!nu) return;
+    if (!out.includes(nu)) out.push(nu);
+  };
+
+  if (!profile) return out;
+
+  // Common buckets
+  const buckets: any[] = [
+    profile.photos,
+    profile.images,
+    profile.gallery,
+    profile.photoUrls,
+    profile.photoURLs,
+    profile.designImages,
+  ];
+
+  for (const b of buckets) {
+    if (Array.isArray(b)) {
+      for (const item of b) {
+        if (typeof item === 'string') push(item);
+        else if (item && typeof item === 'object') {
+          const u = item.url || item.src || item.photoUrl || item.imageUrl;
+          push(u);
+        }
+      }
+    }
+  }
+
+  // Singletons (best-effort)
+  push(profile.primaryPhotoUrl);
+  push(profile.primaryPhoto);
+  push(profile.profilePhotoUrl);
+  push(profile.profilePhoto);
+  push(profile.avatarUrl);
+  push(profile.avatar);
+  push(profile.photoUrl);
+  push(profile.imageUrl);
+  push(profile.image);
+
+  return out;
+}
+
+function getStr(p: any, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = p?.[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function getNum(p: any, ...keys: string[]): number | null {
+  for (const k of keys) {
+    const v = p?.[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
 function placeholderAvatarDataUri(name: string) {
   const initials = (name || 'U')
     .split(/\s+/)
@@ -216,6 +283,7 @@ export default function DiscoverPage() {
   const [idx, setIdx] = useState(0);
   const [status, setStatus] = useState<string>('');
   const [expanded, setExpanded] = useState(false);
+  const [photoModalUrl, setPhotoModalUrl] = useState<string | null>(null);
   const [swipeLabel, setSwipeLabel] = useState<SwipeLabel>(null);
   const [busy, setBusy] = useState(false);
   const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
@@ -272,6 +340,43 @@ export default function DiscoverPage() {
     }
   }, [current]);
 
+  const expandedDetails = useMemo(() => {
+    const p: any = (current as any) || {};
+
+    const photos = collectPhotoUrls(p);
+    const primary = pickPhotoUrl(p) || photos[0] || null;
+
+    const displayName = safeString(p.displayName || p.name || p.display || '');
+    const fullName = safeString(p.fullName || p.realName || '');
+    const headline = safeString(p.headline || p.tagline || p.title || '');
+    const about = safeString(p.about || p.bio || p.description || '');
+
+    const sex = safeString(p.sex || p.gender || '');
+    const age = typeof p.age === 'number' ? p.age : typeof p.age === 'string' ? Number(p.age) : null;
+    const zip = safeString(p.zipCode || p.zip || p.zipcode || p.postalCode || p.postal || '');
+    const city = safeString(p.city || '');
+
+    // interests could be string[] or comma-separated string
+    let interests: string[] = [];
+    const rawInterests = p.interests;
+    if (Array.isArray(rawInterests)) interests = rawInterests.map((x: any) => safeString(x)).filter(Boolean);
+    else if (typeof rawInterests === 'string') interests = rawInterests.split(',').map((s: string) => safeString(s)).filter(Boolean);
+
+    return {
+      photos,
+      primary,
+      displayName,
+      fullName,
+      headline,
+      about,
+      sex,
+      age: Number.isFinite(age as number) ? (age as number) : null,
+      zip,
+      city,
+      interests,
+    };
+  }, [current]);
+
   const distanceMi = useMemo(() => {
     try {
       if (myLoc && currentLoc) {
@@ -281,17 +386,6 @@ export default function DiscoverPage() {
     } catch {}
     return null as number | null;
   }, [myLoc, currentLoc]);
-
-
-  const currentAbout = useMemo(() => {
-    try {
-      const anyCur: any = current as any;
-      return safeString(anyCur?.about || anyCur?.bio || anyCur?.headline || anyCur?.description || '');
-    } catch {
-      return '';
-    }
-  }, [current]);
-
 
 
   const pillBtn: React.CSSProperties = {
@@ -734,7 +828,7 @@ export default function DiscoverPage() {
                   <span style={{ opacity: 0.9 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
-                  {currentAbout ? currentAbout : 'Swipe left/right, or swipe up to view profile.'}
+                  {expandedDetails.about || expandedDetails.headline || 'Swipe left/right, or swipe up to view profile.'}
                 </div>
               </div>
 
@@ -791,8 +885,8 @@ export default function DiscoverPage() {
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ fontSize: 22, fontWeight: 900 }}>
-                {currentName}
-                {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
+                {expandedDetails.displayName || currentName}
+                {typeof expandedDetails.age === 'number' ? `, ${expandedDetails.age}` : typeof currentAge === 'number' ? `, ${currentAge}` : ''}
               </div>
               <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
                 ↓ Back
@@ -802,14 +896,51 @@ export default function DiscoverPage() {
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{currentAbout || 'No bio yet.'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails.about || expandedDetails.headline || 'No bio yet.'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
-                <div style={{ opacity: 0.92 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</div>
+                <div style={{ opacity: 0.92 }}>{expandedDetails.zip || expandedDetails.city || currentZip || '—'}</div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Distance</div>
+                <div style={{ opacity: 0.92 }}>{distanceMi != null ? `${distanceMi} mi` : '—'}</div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Sex</div>
+                <div style={{ opacity: 0.92 }}>{expandedDetails.sex || '—'}</div>
               </div>
             </div>
+
+            {expandedDetails.photos.length > 0 && (
+              <div style={{ display: 'grid', gap: 8, marginTop: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Photos</div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {expandedDetails.photos.slice(0, 12).map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => setPhotoModalUrl(u)}
+                      style={{
+                        width: 70,
+                        height: 70,
+                        borderRadius: 12,
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        background: 'rgba(0,0,0,0.2)',
+                        padding: 0,
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <img src={u} alt="photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
               <button type="button" style={{ ...pillBtn, background: 'rgba(255, 98, 118, 0.12)' }} onClick={() => decide('pass')}>
@@ -824,6 +955,57 @@ export default function DiscoverPage() {
           <div style={{ opacity: 0.85 }}>No profile selected.</div>
         )}
       </div>
+
+      {photoModalUrl && (
+        <div
+          onClick={() => setPhotoModalUrl(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            zIndex: 50,
+            display: 'grid',
+            placeItems: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              width: 'min(920px, 92vw)',
+              height: 'min(720px, 80vh)',
+              borderRadius: 18,
+              overflow: 'hidden',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(0,0,0,0.25)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setPhotoModalUrl(null)}
+              style={{
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                zIndex: 2,
+                width: 38,
+                height: 38,
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.18)',
+                background: 'rgba(0,0,0,0.35)',
+                color: 'rgba(255,255,255,0.92)',
+                cursor: 'pointer',
+                fontSize: 18,
+                lineHeight: '38px',
+              }}
+            >
+              ✕
+            </button>
+            <img src={photoModalUrl} alt="full" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
