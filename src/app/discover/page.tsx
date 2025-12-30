@@ -895,8 +895,13 @@ export default function DiscoverPage() {
 
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Headline</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails.headline || '—'}</div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails.about || expandedDetails.headline || 'No bio yet.'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails.about || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
@@ -923,7 +928,7 @@ export default function DiscoverPage() {
                     <button
                       key={u}
                       type="button"
-                      onClick={() => setPhotoModalUrl(u)}
+                      onClick={(e) => { e.stopPropagation(); setPhotoModalUrl(u); }} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
                       style={{
                         width: 70,
                         height: 70,
