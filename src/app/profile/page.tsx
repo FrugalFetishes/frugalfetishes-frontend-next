@@ -257,7 +257,7 @@ export default function ProfilePage() {
         sex,
         age,
         zipCode,
-        photos,
+        photos: [primaryPhotoUrl, ...gallery].filter(Boolean),
         photoUrl: primaryPhotoUrl,
         interests,
         city,
