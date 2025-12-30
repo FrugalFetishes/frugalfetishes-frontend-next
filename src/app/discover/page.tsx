@@ -358,24 +358,17 @@ export default function DiscoverPage() {
 
     const fullName = safeString(localExtrasAny?.fullName || (current as any).fullName || '');
 
-    const headline = safeString(
-      localSnapAny?.headline ||
-        localExtrasAny?.headline ||
-        (current as any).headline ||
-        (current as any).tagline ||
-        (current as any).intro ||
-        (current as any).introduction ||
-        (current as any).bio ||
+        const headline = safeString(
+      getStr(localSnapAny, 'headline', 'headlineText', 'tagline', 'intro', 'introduction', 'bio') ||
+        getStr(localExtrasAny, 'headline', 'headlineText', 'tagline', 'intro', 'introduction', 'bio') ||
+        getStr(current as any, 'headline', 'headlineText', 'tagline', 'intro', 'introduction', 'bio') ||
         ''
     );
 
-    const about = safeString(
-      localSnapAny?.about ||
-        localExtrasAny?.about ||
-        (current as any).about ||
-        (current as any).bio ||
-        (current as any).introduction ||
-        (current as any).intro ||
+        const about = safeString(
+      getStr(localSnapAny, 'about', 'aboutText', 'bio', 'introduction', 'intro') ||
+        getStr(localExtrasAny, 'about', 'aboutText', 'bio', 'introduction', 'intro') ||
+        getStr(current as any, 'about', 'aboutText', 'bio', 'introduction', 'intro') ||
         ''
     );
 
@@ -411,9 +404,14 @@ export default function DiscoverPage() {
     else if (typeof rawInterests === 'string')
       interests = rawInterests.split(',').map((s: string) => safeString(s)).filter(Boolean);
 
-    // Photos: prefer localSnap gallery (recent edits), but fall back to feed payload
+        // Photos: merge localSnap (recent edits) + feed payload; always include the card photo too.
+    const cardPhoto = safeString(pickPhotoUrl(current));
     const photos = collectPhotoUrls(localSnapAny || current);
-    const primary = safeString(localSnapAny?.primaryPhotoUrl || (current as any).primaryPhotoUrl || photos[0] || '');
+    if (cardPhoto && !photos.includes(cardPhoto)) photos.unshift(cardPhoto);
+
+    const primary = safeString(
+      localSnapAny?.primaryPhotoUrl || (current as any).primaryPhotoUrl || cardPhoto || photos[0] || ''
+    );
 
     return {
       photos,
