@@ -16,7 +16,7 @@ import {
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || 'https://express-js-on-vercel-rosy-one.vercel.app';
 
-async function postJson(path: string, token: string, payload: any) {
+async function postJson(path: string, token: string | null, payload: any) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: {
