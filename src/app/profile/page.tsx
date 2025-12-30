@@ -11,6 +11,29 @@ import {
   setProfileExtras,
 } from '@/lib/socialStore';
 
+// Backend base used for /api/feed and profile sync.
+// NOTE: This frontend app calls the backend deployed from: express-js-on-vercel/src/index.ts
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || 'https://express-js-on-vercel-rosy-one.vercel.app';
+
+async function postJson(path: string, token: string, payload: any) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token ? `Bearer ${token}` : '',
+    },
+    body: JSON.stringify(payload ?? {}),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`POST ${path} failed: ${res.status} ${t}`);
+  }
+  return res.json().catch(() => ({}));
+}
+
+
 function clampStr(v: any): string {
   if (typeof v === 'string') return v;
   if (v == null) return '';
@@ -226,7 +249,7 @@ export default function ProfilePage() {
 
           // Also persist to backend so /api/feed and expanded profile can show these fields
     try {
-      await apiPost('/api/profile/update', {
+      await postJson('/api/profile/update', token, {
         displayName,
         fullName,
         headline,
