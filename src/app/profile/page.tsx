@@ -1,855 +1,686 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AppHeader from '@/components/AppHeader';
-import { apiGet, apiPost } from '@/lib/api';
-import { requireSession, clearSession } from '@/lib/session';
+import { requireSession } from '@/lib/session';
+import {
+  uidFromToken,
+  loadUserProfileSnapshot,
+  upsertUserProfileSnapshot,
+  getProfileExtras,
+  setProfileExtras,
+} from '@/lib/socialStore';
 
+// Backend base used for /api/feed and profile sync.
+// NOTE: This frontend app calls the backend deployed from: express-js-on-vercel/src/index.ts
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || 'https://express-js-on-vercel-rosy-one.vercel.app';
 
-import { uidFromToken, likeUser, getProfileExtras } from '@/lib/socialStore';
-type Profile = {
-  id: string;
-  name: string;
-  age?: number;
-  zipCode?: string;
-  sex?: 'male' | 'female';
-  location?: { lat: number; lng: number };
-  bio?: string;
-  photoUrl?: string;
-  profilePhotoUrl?: string;
-  primaryPhotoUrl?: string;
-  mainPhotoUrl?: string;
-  imageUrl?: string;
-  avatarUrl?: string;
-  images?: any[];
-  photos?: any[];
-  gallery?: any[];
-};
-
-const DECK_KEY = 'ff_deck_profiles_v2';
-const IDX_KEY = 'ff_deck_idx_v2';
-const MATCHES_KEY = 'ff_matches_v2';
-
-function safeJsonParse<T>(raw: string | null, fallback: T): T {
-  try {
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
+async function postJson(path: string, token: string | null, payload: any) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token ? `Bearer ${token}` : '',
+    },
+    body: JSON.stringify(payload ?? {}),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`POST ${path} failed: ${res.status} ${t}`);
   }
-}
-
-function safeString(v: any, fallback: string = ''): string {
-  try {
-    if (v === undefined || v === null) return fallback;
-    const s = String(v).trim();
-    return s ? s : fallback;
-  } catch {
-    return fallback;
-  }
+  return res.json().catch(() => ({}));
 }
 
 
-function normalizeLoc(v: any): { lat: number; lng: number } | null {
-  try {
-    if (!v) return null;
+async function getJson(path: string, token: string | null) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'GET',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`GET ${path} failed: ${res.status} ${t}`);
+  }
+  return res.json().catch(() => ({}));
+}
 
-    // Firestore GeoPoint-like
-    const lat1 = v.lat ?? v.latitude ?? v._latitude;
-    const lng1 = v.lng ?? v.longitude ?? v._longitude;
 
-    if (typeof lat1 === 'number' && typeof lng1 === 'number') return { lat: lat1, lng: lng1 };
+function clampStr(v: any): string {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  try { return String(v); } catch { return ''; }
+}
 
-    // Strings like "40.1" or "40.1,-74.2"
-    if (typeof v === 'string') {
-      const s = v.trim();
-      if (!s) return null;
-      if (s.includes(',')) {
-        const [a, b] = s.split(',').map((x) => x.trim());
-        const la = Number(a);
-        const ln = Number(b);
-        if (Number.isFinite(la) && Number.isFinite(ln)) return { lat: la, lng: ln };
-      } else {
-        // single string can't be a location
-        return null;
-      }
+function isDataUri(s: string) {
+  return typeof s === 'string' && s.startsWith('data:image/');
+}
+
+function ensureHttps(url: string) {
+  const u = clampStr(url).trim();
+  if (!u) return '';
+  if (isDataUri(u)) return u;
+  if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  // allow protocol-relative or bare domains
+  if (u.startsWith('//')) return 'https:' + u;
+  return 'https://' + u;
+}
+
+function normalizePhotoUrl(url: string) {
+  return ensureHttps(url).trim();
+}
+
+export default function ProfilePage() {
+  const token = useMemo(() => requireSession(), []);
+  const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
+
+  const snap = useMemo(() => loadUserProfileSnapshot(uid), [uid]);
+  const extras = useMemo(() => getProfileExtras(uid), [uid]);
+  const extrasAny: any = extras as any;
+
+  const initialGallery: string[] = useMemo(() => {
+        const anyExtras: any = extras as any;
+    const g = (anyExtras && (anyExtras.gallery || anyExtras.galleryUrls)) as any;
+    const fromExtras = Array.isArray(g) ? g.filter(Boolean).map((x) => clampStr(x)).filter(Boolean) : [];
+
+    // Also honor legacy/alternate single-photo fields so the current profile picture
+    // shows up even if the gallery array isn't populated.
+    const legacySingles = [
+      (extras as any)?.primaryPhotoUrl,
+      (extras as any)?.photoUrl,
+      (extras as any)?.avatarUrl,
+      (snap as any)?.primaryPhotoUrl,
+      (snap as any)?.photoUrl,
+      (snap as any)?.photoURL,
+      (snap as any)?.avatarUrl,
+    ]
+      .map((x) => clampStr(x))
+      .filter(Boolean);
+
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const u of [...legacySingles, ...fromExtras]) {
+      if (!u) continue;
+      if (seen.has(u)) continue;
+      seen.add(u);
+      out.push(u);
     }
+    return out;
+  }, [extras, snap]);
 
-    // Arrays like [lat,lng]
-    if (Array.isArray(v) && v.length >= 2) {
-      const la = Number(v[0]);
-      const ln = Number(v[1]);
-      if (Number.isFinite(la) && Number.isFinite(ln)) return { lat: la, lng: ln };
-    }
+  const initialPrimary = useMemo(() => {
+    const anyExtras: any = extras as any;
+    const fromExtras = clampStr(anyExtras?.primaryPhotoUrl || anyExtras?.avatarUrl || anyExtras?.photoUrl || anyExtras?.photoURL || '');
+    const fromSnap = clampStr((snap as any)?.photoUrl || (snap as any)?.photoURL || '');
+    return fromExtras || fromSnap || initialGallery[0] || '';
+  }, [extras, snap, initialGallery]);
 
-    // Objects with string lat/lng
-    if (lat1 != null && lng1 != null) {
-      const la = Number(lat1);
-      const ln = Number(lng1);
-      if (Number.isFinite(la) && Number.isFinite(ln)) return { lat: la, lng: ln };
-    }
+  const initialAge = useMemo(() => {
+    const n = Number((extras as any)?.age ?? (snap as any)?.age ?? 0);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }, [extras, snap]);
 
-    return null;
-  } catch {
-    return null;
-  }
-}
+  const initialSex = useMemo(() => {
+    const v = String((extras as any)?.sex ?? (snap as any)?.sex ?? 'any');
+    return (v || 'any').toLowerCase();
+  }, [extras, snap]);
 
-function distanceMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const toRad = (n: number) => (n * Math.PI) / 180;
-  const R = 3958.8; // Earth radius miles
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
+  const initialZipCode = useMemo(() => {
+    const ex: any = extras as any;
+    const sn: any = snap as any;
+    return String(ex?.zipCode ?? ex?.zip ?? sn?.zipCode ?? sn?.zip ?? '').toString();
+  }, [extras, snap]);
 
-  const h =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-  return R * c;
-}
+  const initialLocation = useMemo(() => {
+    const loc = (extras as any)?.location ?? (snap as any)?.location;
+    if (loc && typeof loc === 'object' && typeof (loc as any).lat === 'number' && typeof (loc as any).lng === 'number') return loc as { lat: number; lng: number };
+    return null as null | { lat: number; lng: number };
+  }, [extras, snap]);
 
+  const [age, setAge] = useState<number>(initialAge);
+  const [sex, setSex] = useState<string>(initialSex);
+  const [zipCode, setZipCode] = useState<string>(initialZipCode);
 
-function saveLS(key: string, value: any) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-function loadLS<T>(key: string, fallback: T): T {
-  try {
-    return safeJsonParse<T>(localStorage.getItem(key), fallback);
-  } catch {
-    return fallback;
-  }
-}
+  const [displayName, setDisplayName] = useState<string>(clampStr(snap?.displayName || extrasAny?.displayName || ''));
+  const [fullName, setFullName] = useState<string>(clampStr(extrasAny?.fullName || ''));
+  const [headline, setHeadline] = useState<string>(clampStr(extrasAny?.headline || ''));
+  const [about, setAbout] = useState<string>(clampStr(extrasAny?.bio || ''));
+  const [primaryPhotoUrl, setPrimaryPhotoUrl] = useState<string>(clampStr(initialPrimary));
+  const [gallery, setGallery] = useState<string[]>(initialGallery);
+  const effectivePrimary = useMemo(() => normalizePhotoUrl(primaryPhotoUrl || ''), [primaryPhotoUrl]);
 
-function normalizePhotoUrl(p?: string | null): string | null {
-  if (!p) return null;
-  const s = String(p).trim();
-  if (!s) return null;
-
-  // Never use site branding assets as a profile photo.
-  if (s.includes('frugalfetishes.png') || s.includes('FFmenuheaderlogo.png')) return null;
-
-  // Next serves the /public folder at the site root.
-  // Normalize both "/public/x.png" and "x.png" -> "/x.png".
-  if (s.startsWith('/public/')) return `/${s.slice('/public/'.length)}`;
-  if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:') || s.startsWith('/')) return s;
-
-  // Bare filename -> from /public at root
-  return `/${s.replace(/^\/+/, '')}`;
-}
-
-function pickPhotoUrl(profile: any): string | null {
-  const direct =
-    profile?.profilePhotoUrl ||
-    profile?.primaryPhotoUrl ||
-    profile?.mainPhotoUrl ||
-    profile?.photoUrl ||
-    profile?.imageUrl ||
-    profile?.avatarUrl;
-
-  const directNorm = normalizePhotoUrl(direct);
-  if (directNorm) return directNorm;
-
-  const arrCandidates: any[] = [];
-  for (const key of ['images', 'photos', 'gallery']) {
-    if (Array.isArray(profile?.[key])) arrCandidates.push(...profile[key]);
-  }
-  for (const item of arrCandidates) {
-    const u = normalizePhotoUrl(item?.url || item?.src || item?.href || item);
-    if (u) return u;
-  }
-  return null;
-}
-
-function placeholderAvatarDataUri(name: string) {
-  const initials = (name || 'U')
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((s) => s[0]?.toUpperCase() || '')
-    .join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="rgba(255, 126, 185, 0.45)"/>
-      <stop offset="1" stop-color="rgba(121, 84, 255, 0.35)"/>
-    </linearGradient>
-  </defs>
-  <rect width="1200" height="1200" fill="url(#g)"/>
-  <circle cx="600" cy="520" r="220" fill="rgba(255,255,255,0.20)"/>
-  <circle cx="600" cy="1240" r="520" fill="rgba(255,255,255,0.12)"/>
-  <text x="600" y="700" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="260" font-weight="800" fill="rgba(255,255,255,0.78)">${initials}</text>
-</svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
-type SwipeLabel = 'like' | 'pass' | null;
-
-export default function DiscoverPage() {
-  const myUid = useMemo(() => {
-    try {
-      return uidFromToken(requireSession()) || 'anon';
-    } catch {
-      return 'anon';
-    }
-  }, []);
-
-  const myExtras = useMemo(() => {
-    try {
-      return getProfileExtras(myUid);
-    } catch {
-      return null as any;
-    }
-  }, [myUid]);
-
-  const [deviceLoc, setDeviceLoc] = useState<{ lat: number; lng: number } | null>(null);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const cached = window.localStorage.getItem('ff_device_loc');
-      if (cached) {
-        const obj = JSON.parse(cached);
-        if (obj && typeof obj.lat === 'number' && typeof obj.lng === 'number') setDeviceLoc({ lat: obj.lat, lng: obj.lng });
-      }
-    } catch {}
-
-    // Attempt to get location (mobile-first); if denied it will silently fall back to ZIP.
-    try {
-      if (!navigator.geolocation) return;
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setDeviceLoc(next);
-          try {
-            window.localStorage.setItem('ff_device_loc', JSON.stringify(next));
-          } catch {}
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    } catch {}
-  }, []);
-
-  const myLoc = normalizeLoc(deviceLoc) || normalizeLoc((myExtras as any)?.location);
-  const myZip = useMemo(() => safeString((myExtras as any)?.zipCode || (myExtras as any)?.zip || ''), [myExtras]);
-
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [idx, setIdx] = useState(0);
+  const [newUrl, setNewUrl] = useState<string>('');
   const [status, setStatus] = useState<string>('');
-  const [expanded, setExpanded] = useState(false);
-  const [swipeLabel, setSwipeLabel] = useState<SwipeLabel>(null);
-  const [busy, setBusy] = useState(false);
-  const [decisionApiEnabled, setDecisionApiEnabled] = useState(true);
-
-  const drag = useRef({ active: false, x0: 0, y0: 0, dx: 0, dy: 0 });
-  const [dragXY, setDragXY] = useState({ x: 0, y: 0 });
-
-  const current = profiles[idx] || null;
-  const currentPhoto = current ? pickPhotoUrl(current) : null;
-
-  // Derived display fields for placeholders / expanded panel (kept purely client-side; no swipe logic changes)
-  const currentName = useMemo(() => {
-    try {
-      const anyCur: any = current as any;
-      return safeString(anyCur?.displayName || anyCur?.name || anyCur?.fullName || anyCur?.email || anyCur?.id || 'User');
-    } catch {
-      return 'User';
-    }
-  }, [current]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
 
-  const currentAge = useMemo(() => {
-    try {
-      const anyCur: any = current as any;
-      const n = Number(anyCur?.age);
-      return Number.isFinite(n) ? n : undefined;
-    } catch {
-      return undefined;
-    }
-  }, [current]);
+  // One-time backend hydration: ensures ALL accounts (Jess/Rebecca etc.) load the same saved values
+  // even if localStorage buckets were previously mismatched.
+  const backendHydratedRef = useRef<string>('');
+  useEffect(() => {
+    if (!token || !uid || uid === 'anon') return;
+    if (backendHydratedRef.current === uid) return;
+    backendHydratedRef.current = uid;
 
-  const currentZip = useMemo(() => {
-    try {
-      const curr: any = current as any;
-      return safeString(curr?.zipCode || curr?.zip || curr?.postalCode || '');
-    } catch {
-      return '';
-    }
-  }, [current]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const j: any = await getJson('/api/profile/me', token);
+        if (cancelled) return;
+        const src: any = (j && (j.profile || j.user)) || {};
 
-  const currentLoc = useMemo(() => {
-    try {
-      const curId = (current as any)?.id;
-      if (!curId) return null;
-      const ex: any = getProfileExtras(curId);
-      const loc = normalizeLoc(ex?.location);
-      if (loc) return loc;
-      const curAny: any = current as any;
-      const loc2 = normalizeLoc(curAny?.location);
-      if (loc2) return loc2;
-      return null;
-    } catch {
-      return null;
-    }
-  }, [current]);
+        const nextDisplayName = clampStr(src.displayName || '');
+        const nextFullName = clampStr(src.fullName || '');
+        const nextHeadline = clampStr(src.headline || '');
+        const nextAbout = clampStr(src.about || src.bio || '');
+        const nextSex = clampStr(src.sex || '');
+        const nextZip = clampStr(src.zipCode || src.zip || '');
+        const nextAge = typeof src.age === 'number' ? src.age : null;
 
-  const distanceMi = useMemo(() => {
-    try {
-      if (myLoc && currentLoc) {
-        const d = distanceMiles(myLoc, currentLoc);
-        if (Number.isFinite(d)) return Math.round(d * 10) / 10;
+        const nextPrimary = normalizePhotoUrl(clampStr(src.photoUrl || ''));
+        const nextPhotos = Array.isArray(src.photos) ? src.photos.map((x: any) => clampStr(x)).filter(Boolean) : [];
+        const mergedGallery = Array.from(new Set([nextPrimary, ...nextPhotos, ...gallery].filter(Boolean))).slice(0, 9);
+
+        // Only set state if backend has something meaningful (avoid clobbering user typing).
+        if (nextDisplayName && !displayName) setDisplayName(nextDisplayName);
+        if (nextFullName && !fullName) setFullName(nextFullName);
+        if (nextHeadline && !headline) setHeadline(nextHeadline);
+        if (nextAbout && !about) setAbout(nextAbout);
+        if (nextSex && (!sex || sex === 'any')) setSex(nextSex);
+        if (nextZip && !zipCode) setZipCode(nextZip);
+        if (typeof nextAge === 'number' && (!age || age < 18)) setAge(nextAge);
+
+        if (nextPrimary && !primaryPhotoUrl) setPrimaryPhotoUrl(nextPrimary);
+        if (mergedGallery.length && mergedGallery.join('|') != gallery.join('|')) setGallery(mergedGallery);
+
+        // Update local store so future refreshes are consistent.
+        if (nextDisplayName || nextHeadline || nextAbout || nextZip || nextPrimary || nextPhotos.length) {
+          upsertUserProfileSnapshot(uid, {
+            id: uid,
+            displayName: nextDisplayName || displayName || uid,
+            fullName: nextFullName || fullName || '',
+            email: '',
+            photoUrl: nextPrimary || primaryPhotoUrl || '',
+            updatedAt: Date.now(),
+            sex: nextSex || sex || 'any',
+            age: typeof nextAge === 'number' ? nextAge : Number(age) || 0,
+            zipCode: nextZip || zipCode || '',
+            location: (src.location && typeof src.location === 'object') ? src.location : initialLocation || null,
+          } as any);
+
+          setProfileExtras(uid, {
+            ...(getProfileExtras(uid) as any),
+            displayName: nextDisplayName || displayName || uid,
+            fullName: nextFullName || fullName || '',
+            headline: nextHeadline || headline || '',
+            bio: nextAbout || about || '',
+            sex: nextSex || sex || 'any',
+            age: typeof nextAge === 'number' ? nextAge : Number(age) || 0,
+            zipCode: nextZip || zipCode || '',
+            primaryPhotoUrl: nextPrimary || primaryPhotoUrl || '',
+            gallery: mergedGallery,
+          } as any);
+        }
+      } catch (e) {
+        // silent (offline / auth issues). Profile still works from local data.
       }
-    } catch {}
-    return null as number | null;
-  }, [myLoc, currentLoc]);
+    })();
 
-
-  const currentAbout = useMemo(() => {
-    try {
-      const anyCur: any = current as any;
-      return safeString(anyCur?.about || anyCur?.bio || anyCur?.headline || anyCur?.description || '');
-    } catch {
-      return '';
-    }
-  }, [current]);
-
-
-
-  const pillBtn: React.CSSProperties = {
-    height: 36,
-    padding: '0 12px',
-    borderRadius: 999,
-    border: '1px solid rgba(255,255,255,0.14)',
-    background: 'rgba(255,255,255,0.06)',
-    color: 'rgba(255,255,255,0.92)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    cursor: 'pointer',
-    fontSize: 13,
-    lineHeight: '36px',
-    userSelect: 'none',
-  };
-
-  const iconBtn: React.CSSProperties = {
-    width: 42,
-    height: 42,
-    borderRadius: 999,
-    border: '1px solid rgba(255,255,255,0.14)',
-    background: 'rgba(255,255,255,0.08)',
-    color: 'rgba(255,255,255,0.94)',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    userSelect: 'none',
-  };
-
-  async function fetchFeed() {
-    setBusy(true);
-    setStatus('Refreshing…');
-    try {
-      // Require session token (client-side guard). This redirects to /login if missing.
-      requireSession();
-
-      const res = await apiGet('/api/feed');
-      const raw: any[] =
-        (res as any)?.profiles ||
-        (res as any)?.items ||
-        (res as any)?.feed ||
-        (Array.isArray(res) ? (res as any[]) : []) ||
-        [];
-
-      const list: Profile[] = raw
-        .filter(Boolean)
-        .map((p: any) => ({
-          id: String(p.id || p.userId || p.uid || ''),
-          name: String(p.name || p.displayName || 'Unknown'),
-          age: typeof p.age === 'number' ? p.age : Number(p.age) || undefined,
-          zipCode: (p as any).zipCode ? String((p as any).zipCode) : (p as any).zip ? String((p as any).zip) : undefined,
-          bio: p.bio ? String(p.bio) : p.about ? String(p.about) : undefined,
-          photoUrl: p.photoUrl,
-          profilePhotoUrl: p.profilePhotoUrl,
-          primaryPhotoUrl: p.primaryPhotoUrl,
-          mainPhotoUrl: p.mainPhotoUrl,
-          imageUrl: p.imageUrl,
-          avatarUrl: p.avatarUrl,
-          images: p.images,
-          photos: p.photos,
-          gallery: p.gallery,
-        }))
-        .filter((p) => p.id && p.id !== myUid);
-
-      if (list.length) {
-        setProfiles(list);
-        setIdx(0);
-        saveLS(DECK_KEY, list);
-        saveLS(IDX_KEY, 0);
-        setStatus('');
-      } else {
-        // Keep existing deck for testing if backend is empty.
-        setStatus('No more profiles available (using saved demo deck for testing).');
-      }
-    } catch (e: any) {
-      setStatus(e?.message ? String(e.message) : 'Failed to load feed.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function resetDeck() {
-    try {
-      const deck = loadLS<Profile[]>(DECK_KEY, []);
-      if (deck.length) setProfiles(deck);
-      setIdx(0);
-      saveLS(IDX_KEY, 0);
-      setStatus('Deck reset.');
-    } catch {
-      setStatus('Could not reset deck.');
-    }
-  }
-
-  async function sendDecision(decision: 'like' | 'pass', targetUserId: string) {
-    // If /api/decision is missing in the backend, we don't want to spam 404s.
-    if (!decisionApiEnabled) return;
-
-    try {
-      // apiPost signature in this repo: (path, body)
-      const res: any = await apiPost('/api/decision', { targetUserId, decision });
-
-      // Some apiPost implementations return a Response; handle that too.
-      const status = typeof res?.status === 'number' ? res.status : null;
-      if (status === 404) {
-        // Backend endpoint not deployed yet; fall back to local-only decisions.
-        setDecisionApiEnabled(false);
-        // Keep UI quiet; this is expected in dev.
-        console.info('Decision API not available (404). Falling back to local-only decisions.');
-      }
-    } catch (e: any) {
-      const msg = String(e?.message || e || '');
-      // If we can detect a 404 from the thrown error, disable future calls.
-      if (msg.includes('404')) {
-        // Backend endpoint not deployed yet; fall back to local-only decisions.
-        setDecisionApiEnabled(false);
-        // Keep UI quiet; this is expected in dev.
-        console.info('Decision API not available (404). Falling back to local-only decisions.');
-      }
-      // Otherwise ignore so UI still works.
-    }
-  }
-
-  function persistLocalMatch(p: Profile) {
-    try {
-      const list = loadLS<any[]>(MATCHES_KEY, []);
-      if (list.some((m) => m?.userId === p.id)) return;
-      list.unshift({
-        id: `m_${p.id}`,
-        userId: p.id,
-        name: p.name,
-        age: p.age,
-        zipCode: (p as any).zipCode || (p as any).zip || undefined,
-        photoUrl: pickPhotoUrl(p),
-        matchedAt: Date.now(),
-      });
-      saveLS(MATCHES_KEY, list);
-    } catch {}
-  }
-
-  function nextCard() {
-    setIdx((i) => {
-      const n = i + 1;
-      saveLS(IDX_KEY, n);
-      return n;
-    });
-    setDragXY({ x: 0, y: 0 });
-    setSwipeLabel(null);
-    setExpanded(false);
-  }
-
-  function decide(decision: 'like' | 'pass') {
-    if (!current) return;
-    if (decision === 'like') try { likeUser(myUid, current.id); } catch {}
-    void sendDecision(decision, current.id);
-    nextCard();
-  }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, uid]);
 
   useEffect(() => {
-    // Hydrate saved deck immediately so you can test swipe even if backend feed is empty.
-    const deck = loadLS<Profile[]>(DECK_KEY, []);
-    const savedIdx = loadLS<number>(IDX_KEY, 0);
-    if (deck.length) setProfiles(deck);
-    if (Number.isFinite(savedIdx) && savedIdx >= 0) setIdx(savedIdx);
-
-    void fetchFeed();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // --- swipe mechanics ---
-  const THRESH_X = 110;
-  const THRESH_UP = 90;
-  const THRESH_DOWN = 80;
-
-  function onPointerDown(e: any) {
-    if (!current) return;
-    drag.current.active = true;
-    drag.current.x0 = e.clientX;
-    drag.current.y0 = e.clientY;
-    try { e.currentTarget?.setPointerCapture?.(e.pointerId); } catch {}
-
-    drag.current.dx = 0;
-    drag.current.dy = 0;
-    setSwipeLabel(null);
-  }
-
-  function onPointerMove(e: any) {
-    if (!drag.current.active) return;
-    const dx = e.clientX - drag.current.x0;
-    const dy = e.clientY - drag.current.y0;
-    drag.current.dx = dx;
-    drag.current.dy = dy;
-
-    // If expanded: allow downward swipe to close
-    if (expanded) {
-      setDragXY({ x: 0, y: Math.min(dy, 0) });
-      if (dy > THRESH_DOWN) {
-        setExpanded(false);
-        drag.current.active = false;
-    try { e.currentTarget?.releasePointerCapture?.(e.pointerId); } catch {}
-
-        setDragXY({ x: 0, y: 0 });
+    // Keep primary in sync and always visible.
+    if (primaryPhotoUrl) {
+      if (!gallery.includes(primaryPhotoUrl)) {
+        setGallery((prev) => [primaryPhotoUrl, ...prev.filter((u) => u !== primaryPhotoUrl)]);
+        return;
       }
-      return;
-    }
-
-    setDragXY({ x: dx, y: dy });
-
-    // Show label while dragging horizontally
-    if (Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(dy)) {
-      setSwipeLabel(dx > 0 ? 'like' : 'pass');
     } else {
-      setSwipeLabel(null);
+      if (gallery.length) setPrimaryPhotoUrl(gallery[0]);
+    }
+  }, [gallery, primaryPhotoUrl]);
+
+  function toast(msg: string) {
+    setStatus(msg);
+    window.setTimeout(() => setStatus(''), 2200);
+  }
+
+  function addUrlToGallery(raw: string) {
+    const url = ensureHttps(raw);
+    if (!url) return;
+    setGallery((prev) => {
+      const next = Array.from(new Set([url, ...prev])).slice(0, 9);
+      return next;
+    });
+    if (!primaryPhotoUrl) setPrimaryPhotoUrl(url);
+  }
+
+  function onPickFiles(files: FileList | null) {
+    if (!files || !files.length) return;
+    const max = Math.min(files.length, 6);
+    let idx = 0;
+
+    const readNext = () => {
+      if (idx >= max) return;
+      const f = files[idx++];
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        if (dataUrl && isDataUri(dataUrl)) {
+          setGallery((prev) => {
+            const next = [dataUrl, ...prev];
+            // keep unique but allow multiple different data URIs
+            const uniq: string[] = [];
+            for (const u of next) {
+              if (!u) continue;
+              if (uniq.includes(u)) continue;
+              uniq.push(u);
+              if (uniq.length >= 9) break;
+            }
+            return uniq;
+          });
+          if (!primaryPhotoUrl) setPrimaryPhotoUrl(dataUrl);
+        }
+        readNext();
+      };
+      reader.onerror = () => readNext();
+      reader.readAsDataURL(f);
+    };
+
+    readNext();
+  }
+
+  function removeFromGallery(url: string) {
+    setGallery((prev) => prev.filter((x) => x !== url));
+    if (primaryPhotoUrl === url) {
+      const next = gallery.filter((x) => x !== url)[0] || '';
+      setPrimaryPhotoUrl(next);
     }
   }
 
-  function onPointerUp() {
-    if (!drag.current.active) return;
-    drag.current.active = false;
+  async function save() {
+    try {
+      const cleanZip = zipCode.trim();
 
-    const { dx, dy } = drag.current;
+      // Snapshot (core fields)
+      upsertUserProfileSnapshot(uid, {
+        id: uid,
+        displayName: displayName.trim(),
+        fullName: fullName.trim(),
+        email: '',
+        photoUrl: primaryPhotoUrl || '',
+        updatedAt: Date.now(),
+        sex: sex || 'any',
+        age: Number(age) || 0,
+        zipCode: cleanZip,
+        location: initialLocation || null,
+      } as any);
 
-    // Up swipe opens expanded profile (only when mostly vertical)
-    if (!expanded && Math.abs(dy) > Math.abs(dx) && dy < -THRESH_UP) {
-      setExpanded(true);
-      setDragXY({ x: 0, y: 0 });
-      setSwipeLabel(null);
-      return;
+      // Extras (editable profile fields + gallery)
+      setProfileExtras(uid, ({
+        displayName: (displayName.trim() || uid),
+        fullName: fullName.trim(),
+        headline: headline.trim(),
+        bio: about.trim(),
+        sex: sex || 'any',
+        age: Number(age) || 0,
+        zipCode: cleanZip,
+        location: initialLocation || null,
+
+        // photo keys (keep compatibility across older UI)
+        primaryPhotoUrl: primaryPhotoUrl || '',
+        avatarUrl: primaryPhotoUrl || '',
+        galleryUrls: gallery,
+        gallery: gallery,
+      } as any));
+
+          // Also persist to backend so /api/feed and expanded profile can show these fields
+    try {
+      await postJson('/api/profile/update', token, {
+        displayName,
+        fullName,
+        headline,
+        about,
+        sex,
+        age,
+        zipCode,
+        photos: [primaryPhotoUrl, ...gallery].filter(Boolean),
+        photoUrl: primaryPhotoUrl,
+        isActive: true,
+      });
+    } catch (e) {
+      // Non-fatal: local save already succeeded
+      console.warn('profile/update failed', e);
     }
 
-    // Horizontal swipe to decide
-    if (!expanded && Math.abs(dx) >= THRESH_X && Math.abs(dx) > Math.abs(dy)) {
-      decide(dx > 0 ? 'like' : 'pass');
-      return;
+toast('Saved!');
+    } catch (e: any) {
+      toast('Save failed');
+      console.error(e);
     }
-
-    // Snap back
-    setDragXY({ x: 0, y: 0 });
-    setSwipeLabel(null);
   }
 
-  const containerStyle: React.CSSProperties = {
+  const pageWrap: React.CSSProperties = {
     minHeight: '100vh',
-    background:
-      'radial-gradient(900px 600px at 20% 20%, rgba(255, 96, 170, 0.22), rgba(0,0,0,0)), radial-gradient(800px 600px at 85% 30%, rgba(120, 84, 255, 0.22), rgba(0,0,0,0)), linear-gradient(180deg, #0b0614, #05030a)',
-    color: 'white',
+    padding: '18px 14px 30px',
+    display: 'flex',
+    justifyContent: 'center',
   };
 
-  const stageStyle: React.CSSProperties = {
-    maxWidth: 980,
-    margin: '0 auto',
-    padding: '16px',
+  const card: React.CSSProperties = {
+    width: 'min(860px, 96vw)',
+    background: 'rgba(0,0,0,0.25)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: 18,
+    padding: 16,
+    boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
   };
 
-  const cardWrap: React.CSSProperties = {
+  const row: React.CSSProperties = {
     display: 'grid',
-    placeItems: 'center',
-    paddingTop: 18,
+    gridTemplateColumns: '1fr 1fr',
+    gap: 12,
+    marginTop: 12,
   };
 
-  const cardStyle: React.CSSProperties = {
-    width: 'min(520px, 94vw)',
-    height: 'min(690px, 72vh)',
-    borderRadius: 26,
+  const label: React.CSSProperties = { fontSize: 12, opacity: 0.85, marginBottom: 6 };
+  const input: React.CSSProperties = {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(0,0,0,0.25)',
+    color: 'white',
+    outline: 'none',
+  };
+
+  const textarea: React.CSSProperties = {
+    ...input,
+    minHeight: 92,
+    resize: 'vertical',
+  };
+
+  const btn: React.CSSProperties = {
+    padding: '9px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.16)',
+    background: 'rgba(255,255,255,0.08)',
+    color: 'white',
+    cursor: 'pointer',
+    fontWeight: 700,
+  };
+
+  const btnSmall: React.CSSProperties = {
+    ...btn,
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 800,
+  };
+
+  const primaryPreviewWrap: React.CSSProperties = {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 16,
     border: '1px solid rgba(255,255,255,0.10)',
-    boxShadow: '0 22px 60px rgba(0,0,0,0.55)',
+    background: 'rgba(255,255,255,0.04)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  };
+
+  const primaryPreviewImg: React.CSSProperties = {
+    width: 84,
+    height: 84,
+    borderRadius: 14,
+    objectFit: 'cover',
+    border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(0,0,0,0.25)',
+  };
+
+  const thumbsWrap: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(92px, 1fr))',
+    gap: 10,
+    marginTop: 10,
+  };
+
+  const thumb: React.CSSProperties = {
+    width: '100%',
+    aspectRatio: '1 / 1',
+    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.12)',
     overflow: 'hidden',
     position: 'relative',
-    transform: `translate(${dragXY.x}px, ${dragXY.y}px) rotate(${dragXY.x * 0.03}deg)`,
-    transition: drag.current.active ? 'none' : 'transform 180ms ease',
-    background:
-      currentPhoto
-        ? `url(${currentPhoto}) center/cover no-repeat`
-        : 'linear-gradient(135deg, rgba(255,126,185,0.18), rgba(121,84,255,0.12))',
-    touchAction: 'none',
+    background: 'rgba(0,0,0,0.25)',
+    cursor: 'pointer',
   };
 
-  const bottomFade: React.CSSProperties = {
+  const thumbImg: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
+  };
+
+  const selectedPill: React.CSSProperties = {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '44%',
-    background: 'linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.76))',
+    left: 8,
+    bottom: 8,
+    padding: '4px 8px',
+    borderRadius: 999,
+    background: 'rgba(0,0,0,0.55)',
+    border: '1px solid rgba(255,255,255,0.22)',
+    fontSize: 11,
+    fontWeight: 900,
   };
 
-  const infoStyle: React.CSSProperties = {
+  const delBtn: React.CSSProperties = {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 14,
-    display: 'grid',
-    gap: 6,
-    zIndex: 2,
-  };
-
-  const nameStyle: React.CSSProperties = { fontSize: 22, fontWeight: 800, letterSpacing: 0.2 };
-
-  const badge: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.85)',
-  };
-
-  const actionRow: React.CSSProperties = {
-    position: 'absolute',
-    right: 14,
-    bottom: 14,
-    display: 'flex',
-    gap: 10,
-    zIndex: 3,
-  };
-
-  const miniHint: React.CSSProperties = {
-    marginTop: 12,
-    opacity: 0.78,
-    fontSize: 12,
+    right: 8,
+    top: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(0,0,0,0.45)',
+    color: 'white',
+    cursor: 'pointer',
+    fontWeight: 900,
+    lineHeight: '26px',
     textAlign: 'center',
   };
 
-  const overlayPill: React.CSSProperties = {
-    position: 'absolute',
-    top: 18,
-    left: 18,
-    padding: '10px 14px',
-    borderRadius: 999,
-    fontWeight: 900,
-    letterSpacing: 2,
-    fontSize: 14,
-    border: '2px solid rgba(255,255,255,0.70)',
-    background: 'rgba(0,0,0,0.30)',
-    textTransform: 'uppercase',
-  };
-
-  const expandedSheet: React.CSSProperties = {
+  const statusStyle: React.CSSProperties = {
     position: 'fixed',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '70vh',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    background: 'rgba(12, 6, 20, 0.90)',
-    backdropFilter: 'blur(14px)',
-    borderTop: '1px solid rgba(255,255,255,0.12)',
-    boxShadow: '0 -20px 60px rgba(0,0,0,0.55)',
-    zIndex: 50,
-    transform: expanded ? 'translateY(0)' : 'translateY(100%)',
-    transition: 'transform 200ms ease',
-    padding: 18,
-    overflow: 'auto',
-  };
-
-  const expandedHandle: React.CSSProperties = {
-    width: 46,
-    height: 5,
-    borderRadius: 999,
-    background: 'rgba(255,255,255,0.22)',
-    margin: '2px auto 12px',
-  };
-
-  const topToast: React.CSSProperties = {
-    position: 'fixed',
-    top: 70,
+    top: 86,
     left: '50%',
     transform: 'translateX(-50%)',
-    width: 'min(760px, 92vw)',
-    padding: '10px 12px',
-    borderRadius: 14,
-    background: 'rgba(0,0,0,0.52)',
-    border: '1px solid rgba(255,255,255,0.12)',
-    backdropFilter: 'blur(10px)',
-    color: 'rgba(255,255,255,0.90)',
-    fontSize: 13,
-    zIndex: 60,
+    zIndex: 99,
+    padding: '8px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(255,255,255,0.18)',
+    background: 'rgba(0,0,0,0.65)',
+    color: 'white',
+    fontWeight: 800,
   };
 
   return (
-    <div style={containerStyle}>
-      <AppHeader active="discover" />
+    <>
+      <AppHeader active="profile" />
 
-      {/* Debug controls (temporary) */}
-      <div style={{ padding: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button type="button" style={pillBtn} onClick={resetDeck}>
-          ↺ Reset deck
-        </button>
-        <button type="button" style={pillBtn} onClick={() => void fetchFeed()} disabled={busy}>
-          ⟳ Refresh
-        </button>
-        <Link href="/matches" style={{ ...pillBtn, textDecoration: 'none' }}>
-          💬 Matches
-        </Link>
-      </div>
+      {status ? <div style={statusStyle}>{status}</div> : null}
 
-      {status ? <div style={topToast}>{status}</div> : null}
-
-      <div style={stageStyle}>
-        <div style={cardWrap}>
-          {current ? (
-            <div
-              style={cardStyle}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-            >
-              {swipeLabel ? (
-                <div
-                  style={{
-                    ...overlayPill,
-                    borderColor: swipeLabel === 'like' ? 'rgba(98, 255, 176, 0.95)' : 'rgba(255, 98, 118, 0.95)',
-                    color: swipeLabel === 'like' ? 'rgba(98, 255, 176, 0.95)' : 'rgba(255, 98, 118, 0.95)',
-                    transform: swipeLabel === 'like' ? 'rotate(-12deg)' : 'rotate(12deg)',
-                  }}
-                >
-                  {swipeLabel === 'like' ? 'LIKE' : 'PASS'}
-                </div>
-              ) : null}
-
-              {!currentPhoto ? (
-                <img
-                  src={placeholderAvatarDataUri(currentName)}
-                  alt={`${currentName}'s photo`}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9 }}
-                />
-              ) : null}
-
-              <div style={bottomFade} />
-
-              <div style={infoStyle}>
-                <div style={nameStyle}>
-                  {currentName}
-                  {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
-                </div>
-                <div style={badge}>
-                  <span style={{ opacity: 0.9 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</span>
-                </div>
-                <div style={{ opacity: 0.85, fontSize: 13 }}>
-                  {currentAbout ? currentAbout : 'Swipe left/right, or swipe up to view profile.'}
-                </div>
-              </div>
-
-              <div style={actionRow}>
-                <button type="button" aria-label="Pass" style={{ ...iconBtn, background: 'rgba(255, 98, 118, 0.14)' }} onClick={() => decide('pass')}>
-                  ✕
-                </button>
-                <button type="button" aria-label="View" style={{ ...iconBtn, background: 'rgba(255,255,255,0.10)' }} onClick={() => setExpanded(true)}>
-                  ⌃
-                </button>
-                <button type="button" aria-label="Like" style={{ ...iconBtn, background: 'rgba(98, 255, 176, 0.14)' }} onClick={() => decide('like')}>
-                  ♥
-                </button>
-              </div>
+      <div style={pageWrap}>
+        <div style={card}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
+              <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
             </div>
-          ) : (
-            <div
-              style={{
-                width: 'min(520px, 94vw)',
-                borderRadius: 22,
-                border: '1px solid rgba(255,255,255,0.10)',
-                background: 'rgba(255,255,255,0.04)',
-                padding: 18,
-              }}
-            >
-              <div style={{ fontWeight: 800, fontSize: 18 }}>No more profiles available</div>
-              <div style={{ opacity: 0.85, marginTop: 8, fontSize: 13 }}>
-                Your backend returned an empty deck from <code>/api/feed</code>, or you already swiped through everything.
-              </div>
-              <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" style={pillBtn} onClick={resetDeck}>
-                  ↺ Reset deck
-                </button>
-                <button type="button" style={pillBtn} onClick={() => void fetchFeed()} disabled={busy}>
-                  ⟳ Refresh
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+            <button type="button" style={btn} onClick={save}>
+              Save
+            </button>
+          </div>
 
-        <div style={miniHint}>Swipe left = Pass · Swipe right = Like · Swipe up = Expand · Swipe down = Close</div>
-      </div>
+          <div style={{ marginTop: 14, fontWeight: 900 }}>Photos</div>
+          <div style={{ opacity: 0.8, fontSize: 12, marginTop: 4 }}>
+            Upload photos, delete them, and click a photo to set it as your profile picture.
+          </div>
 
-      <div
-        style={expandedSheet}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      >
-        <div style={expandedHandle} />
-        {current ? (
-          <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ fontSize: 22, fontWeight: 900 }}>
-                {currentName}
-                {typeof currentAge === 'number' ? `, ${currentAge}` : ''}
-              </div>
-              <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
-                ↓ Back
-              </button>
-            </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => onPickFiles(e.target.files)}
+            />
+            <button type="button" style={btnSmall} onClick={() => fileInputRef.current?.click()}>
+              Upload images
+            </button>
 
-            <div style={{ display: 'grid', gap: 10 }}>
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{currentAbout || 'No bio yet.'}</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 6 }}>
-                <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
-                <div style={{ opacity: 0.92 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-              <button type="button" style={{ ...pillBtn, background: 'rgba(255, 98, 118, 0.12)' }} onClick={() => decide('pass')}>
-                ✕ Pass
-              </button>
-              <button type="button" style={{ ...pillBtn, background: 'rgba(98, 255, 176, 0.12)' }} onClick={() => decide('like')}>
-                ♥ Like
+            <div style={{ display: 'flex', gap: 8, flex: '1 1 320px', alignItems: 'center' }}>
+              <input
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                placeholder="Paste image URL (https://...)"
+                style={input}
+              />
+              <button
+                type="button"
+                style={btnSmall}
+                onClick={() => {
+                  addUrlToGallery(newUrl);
+                  setNewUrl('');
+                }}
+              >
+                Add
               </button>
             </div>
           </div>
-        ) : (
-          <div style={{ opacity: 0.85 }}>No profile selected.</div>
-        )}
+
+          {primaryPhotoUrl ? (
+            <div style={primaryPreviewWrap}>
+              <img src={primaryPhotoUrl} alt="Profile" style={primaryPreviewImg} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, marginBottom: 2 }}>Current profile photo</div>
+                <div style={{ opacity: 0.75, fontSize: 12, lineHeight: 1.2 }}>
+                  Tap any photo below to set it as your profile pic.
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div style={thumbsWrap}>
+            {gallery.length ? (
+              gallery.map((url) => {
+                const selected = normalizePhotoUrl(url) === effectivePrimary;
+                return (
+                  <div
+                    key={url}
+                    style={{
+                      ...thumb,
+                      outline: selected ? '2px solid rgba(255,255,255,0.65)' : 'none',
+                    }}
+                    onClick={() => setPrimaryPhotoUrl(url)}
+                    role="button"
+                    aria-label={selected ? 'Selected profile photo' : 'Set as profile photo'}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="Photo" style={thumbImg} draggable={false} />
+                    {selected ? <div style={selectedPill}>Profile pic</div> : null}
+                    <div
+                      style={delBtn}
+                      role="button"
+                      aria-label="Delete photo"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromGallery(url);
+                      }}
+                    >
+                      ×
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ opacity: 0.8, padding: 10, fontSize: 13 }}>No photos yet. Upload or add a URL.</div>
+            )}
+          </div>
+
+          <div style={row}>
+            <div>
+              <div style={label}>Display name</div>
+              <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={input} />
+            </div>
+            <div>
+              <div style={label}>Full name</div>
+              <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={input} />
+            </div>
+          </div>
+
+
+          <div style={row}>
+            <div>
+              <div style={label}>Sex</div>
+              <select value={sex} onChange={(e) => setSex(e.target.value)} style={input as any}>
+                <option value="any">Any</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="nonbinary">Non-binary</option>
+              </select>
+            </div>
+            <div>
+              <div style={label}>Age</div>
+              <input
+                value={age ? String(age) : ''}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setAge(Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0);
+                }}
+                placeholder="e.g. 28"
+                style={input}
+                inputMode="numeric"
+              />
+            </div>
+            <div>
+              <div style={label}>ZIP code</div>
+              <input value={zipCode} onChange={(e) => setZipCode(e.target.value)} placeholder="e.g. 33101" style={input} />
+            </div>
+          </div>
+
+
+          <div style={row}>
+            <div>
+              <div style={label}>Headline</div>
+              <input value={headline} onChange={(e) => setHeadline(e.target.value)} style={input} />
+            </div>
+            <div>
+              <div style={label}>Profile photo URL (auto from selection)</div>
+              <input
+                value={primaryPhotoUrl}
+                onChange={(e) => setPrimaryPhotoUrl(e.target.value)}
+                placeholder="Select a photo above or paste URL"
+                style={input}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <div style={label}>About</div>
+            <textarea value={about} onChange={(e) => setAbout(e.target.value)} style={textarea} />
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
