@@ -311,54 +311,7 @@ export default function DiscoverPage() {
       return 'User';
     }
   }, [current]);
-
-  const expandedPhotoUrls = useMemo(() => {
-    try {
-      if (!expanded) return [] as string[];
-      return collectPhotoUrls({ ...(current as any), ...(expandedDetails as any) });
-    } catch {
-      return [] as string[];
-    }
-  }, [expanded, current, expandedDetails]);
-
-
-
-  const currentAge = useMemo(() => {
-    try {
-      const anyCur: any = current as any;
-      const n = Number(anyCur?.age);
-      return Number.isFinite(n) ? n : undefined;
-    } catch {
-      return undefined;
-    }
-  }, [current]);
-
-  const currentZip = useMemo(() => {
-    try {
-      const curr: any = current as any;
-      return safeString(curr?.zipCode || curr?.zip || curr?.postalCode || '');
-    } catch {
-      return '';
-    }
-  }, [current]);
-
-  const currentLoc = useMemo(() => {
-    try {
-      const curId = (current as any)?.id;
-      if (!curId) return null;
-      const ex: any = getProfileExtras(curId);
-      const loc = ex?.location;
-      if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') return { lat: loc.lat, lng: loc.lng };
-      const curAny: any = current as any;
-      const loc2 = curAny?.location;
-      if (loc2 && typeof loc2.lat === 'number' && typeof loc2.lng === 'number') return { lat: loc2.lat, lng: loc2.lng };
-      return null;
-    } catch {
-      return null;
-    }
-  }, [current]);
-
-  const expandedDetails = useMemo(() => {
+const expandedDetails = useMemo(() => {
     if (!current) return null;
 
     const pid = safeString((current as any).id || (current as any).uid || (current as any)._id || '');
@@ -446,7 +399,53 @@ export default function DiscoverPage() {
     };
   }, [current]);
 
-  const distanceMi = useMemo(() => {
+
+
+  const expandedPhotoUrls = useMemo(() => {
+    try {
+      if (!expanded) return [] as string[];
+      return collectPhotoUrls({ ...(current as any), ...(expandedDetails as any) });
+    } catch {
+      return [] as string[];
+    }
+  }, [expanded, current, expandedDetails]);
+
+
+
+  const currentAge = useMemo(() => {
+    try {
+      const anyCur: any = current as any;
+      const n = Number(anyCur?.age);
+      return Number.isFinite(n) ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [current]);
+
+  const currentZip = useMemo(() => {
+    try {
+      const curr: any = current as any;
+      return safeString(curr?.zipCode || curr?.zip || curr?.postalCode || '');
+    } catch {
+      return '';
+    }
+  }, [current]);
+
+  const currentLoc = useMemo(() => {
+    try {
+      const curId = (current as any)?.id;
+      if (!curId) return null;
+      const ex: any = getProfileExtras(curId);
+      const loc = ex?.location;
+      if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') return { lat: loc.lat, lng: loc.lng };
+      const curAny: any = current as any;
+      const loc2 = curAny?.location;
+      if (loc2 && typeof loc2.lat === 'number' && typeof loc2.lng === 'number') return { lat: loc2.lat, lng: loc2.lng };
+      return null;
+    } catch {
+      return null;
+    }
+  }, [current]);const distanceMi = useMemo(() => {
     try {
       if (myLoc && currentLoc) {
         const d = distanceMiles(myLoc, currentLoc);
