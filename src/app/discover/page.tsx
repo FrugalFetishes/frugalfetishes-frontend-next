@@ -428,7 +428,7 @@ export default function DiscoverPage() {
       city,
       interests,
     };
-  }, [current, uid]);}, [current]);
+  }, [current, uid]);
 
   const distanceMi = useMemo(() => {
     try {
