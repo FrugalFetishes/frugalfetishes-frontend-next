@@ -1,4 +1,4 @@
-'use client'; 
+'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AppHeader from '@/components/AppHeader';
@@ -36,7 +36,6 @@ function normalizePhotoUrl(url: string) {
 }
 
 export default function ProfilePage() {
-  const PROFILE_PAGE_MARKER = 'TEST-123';
   const token = useMemo(() => requireSession(), []);
   const uid = useMemo(() => (uidFromToken(token) ?? 'anon'), [token]);
 
@@ -387,7 +386,6 @@ export default function ProfilePage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
             <div>
               <div style={{ fontSize: 20, fontWeight: 900 }}>Profile</div>
-              <div style={{ opacity: 0.6, marginTop: 2, fontSize: 12 }}>({PROFILE_PAGE_MARKER})</div>
               <div style={{ opacity: 0.78, marginTop: 2, fontSize: 12 }}>Logged in as: {uid}</div>
             </div>
             <button type="button" style={btn} onClick={save}>
