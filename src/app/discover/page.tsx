@@ -881,7 +881,7 @@ export default function DiscoverPage() {
                   <span style={{ opacity: 0.9 }}>{distanceMi != null ? `${distanceMi} mi` : (currentZip || '—')}</span>
                 </div>
                 <div style={{ opacity: 0.85, fontSize: 13 }}>
-                  {expandedDetails.about || expandedDetails.headline || 'Swipe left/right, or swipe up to view profile.'}
+                  {expandedDetails?.about || expandedDetails?.headline || 'Swipe left/right, or swipe up to view profile.'}
                 </div>
               </div>
 
@@ -938,8 +938,8 @@ export default function DiscoverPage() {
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div style={{ fontSize: 22, fontWeight: 900 }}>
-                {expandedDetails.displayName || currentName}
-                {typeof expandedDetails.age === 'number' ? `, ${expandedDetails.age}` : typeof currentAge === 'number' ? `, ${currentAge}` : ''}
+                {expandedDetails?.displayName || currentName}
+                {typeof expandedDetails.age === 'number' ? `, ${expandedDetails?.age}` : typeof currentAge === 'number' ? `, ${currentAge}` : ''}
               </div>
               <button type="button" style={pillBtn} onClick={() => setExpanded(false)}>
                 ↓ Back
@@ -949,17 +949,17 @@ export default function DiscoverPage() {
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Headline</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails.headline || '—'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails?.headline || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>About</div>
-                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails.about || '—'}</div>
+                <div style={{ opacity: 0.92, lineHeight: 1.55 }}>{expandedDetails?.about || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>ZIP</div>
-                <div style={{ opacity: 0.92 }}>{expandedDetails.zip || expandedDetails.city || currentZip || '—'}</div>
+                <div style={{ opacity: 0.92 }}>{expandedDetails?.zip || expandedDetails.city || currentZip || '—'}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 6 }}>
@@ -969,15 +969,15 @@ export default function DiscoverPage() {
 
               <div style={{ display: 'grid', gap: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Sex</div>
-                <div style={{ opacity: 0.92 }}>{expandedDetails.sex || '—'}</div>
+                <div style={{ opacity: 0.92 }}>{expandedDetails?.sex || '—'}</div>
               </div>
             </div>
 
-            {expandedDetails.photos.length > 0 && (
+            {expandedDetails?.photos.length > 0 && (
               <div style={{ display: 'grid', gap: 8, marginTop: 6 }}>
                 <div style={{ opacity: 0.8, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>Photos</div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {expandedDetails.photos.slice(0, 12).map((u) => (
+                  {expandedDetails?.photos.slice(0, 12).map((u) => (
                     <button
                       key={u}
                       type="button"
